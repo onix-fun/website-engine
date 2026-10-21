@@ -19,8 +19,8 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"websiteengine/internal/environment"
-	"websiteengine/internal/storage"
+	"websiteengine/pkg/environment"
+	"websiteengine/pkg/storage"
 )
 
 type Repository struct {

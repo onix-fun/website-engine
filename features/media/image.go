@@ -12,7 +12,7 @@ import (
 	xdraw "golang.org/x/image/draw"
 	_ "golang.org/x/image/webp"
 
-	"websiteengine/internal/storage"
+	"websiteengine/pkg/storage"
 )
 
 var imageVariants = []struct {

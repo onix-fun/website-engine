@@ -4,7 +4,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"websiteengine/internal/artifact"
+	"websiteengine/pkg/artifact"
 )
 
 func ExtractTo(zipPath, dir string) error {

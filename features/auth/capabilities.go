@@ -1,6 +1,6 @@
 package auth
 
-import "websiteengine/internal/environment"
+import "websiteengine/pkg/environment"
 
 // Capabilities are the server-side role checks shared by HTTP handlers. They
 // intentionally mirror the role matrix documented in README.md.

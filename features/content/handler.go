@@ -11,7 +11,7 @@ import (
 
 	"websiteengine/features/auth"
 	"websiteengine/features/features"
-	"websiteengine/internal/environment"
+	"websiteengine/pkg/environment"
 	"websiteengine/presentation/http/response"
 )
 

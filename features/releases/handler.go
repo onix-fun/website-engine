@@ -11,7 +11,7 @@ import (
 	"github.com/google/uuid"
 
 	"websiteengine/features/auth"
-	"websiteengine/internal/environment"
+	"websiteengine/pkg/environment"
 	"websiteengine/presentation/http/response"
 )
 

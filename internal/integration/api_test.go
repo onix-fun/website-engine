@@ -29,7 +29,7 @@ import (
 	"websiteengine/features/media"
 	"websiteengine/features/overview"
 	"websiteengine/features/settings"
-	"websiteengine/internal/storage"
+	"websiteengine/pkg/storage"
 	httptransport "websiteengine/presentation/http"
 	"websiteengine/migrations"
 )

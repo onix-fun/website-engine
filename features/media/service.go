@@ -15,7 +15,7 @@ import (
 	"github.com/google/uuid"
 
 	"websiteengine/features/auth"
-	"websiteengine/internal/storage"
+	"websiteengine/pkg/storage"
 )
 
 const cacheControl = "public, max-age=31536000, immutable"

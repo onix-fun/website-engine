@@ -15,12 +15,12 @@ import (
 	"github.com/google/uuid"
 
 	"websiteengine/features/auth"
-	"websiteengine/internal/artifact"
-	"websiteengine/internal/environment"
-	"websiteengine/internal/secrets"
-	"websiteengine/internal/storage"
+	"websiteengine/pkg/artifact"
+	"websiteengine/pkg/environment"
+	"websiteengine/pkg/secrets"
+	"websiteengine/pkg/storage"
 
-	releaseprovider "websiteengine/internal/releases/provider"
+	releaseprovider "websiteengine/features/releases/provider"
 )
 
 type Service struct {

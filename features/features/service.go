@@ -13,9 +13,9 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 
 	"websiteengine/features/auth"
-	"websiteengine/internal/environment"
+	"websiteengine/pkg/environment"
 	"websiteengine/internal/platform/validate"
-	"websiteengine/internal/publication"
+	"websiteengine/pkg/publication"
 	"websiteengine/presentation/http/response"
 )
 

@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"websiteengine/internal/environment"
+	"websiteengine/pkg/environment"
 )
 
 // Config is the complete runtime configuration. All values come from the

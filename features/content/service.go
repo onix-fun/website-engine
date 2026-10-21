@@ -14,9 +14,9 @@ import (
 
 	"websiteengine/features/auth"
 	"websiteengine/features/features"
-	"websiteengine/internal/environment"
+	"websiteengine/pkg/environment"
 	"websiteengine/internal/platform/validate"
-	"websiteengine/internal/publication"
+	"websiteengine/pkg/publication"
 	"websiteengine/presentation/http/response"
 )
 

@@ -13,7 +13,7 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 
 	"websiteengine/features/features"
-	"websiteengine/internal/environment"
+	"websiteengine/pkg/environment"
 	"websiteengine/internal/platform/validate"
 	"websiteengine/presentation/http/response"
 )

@@ -15,7 +15,7 @@ import (
 	"github.com/aws/smithy-go"
 
 	"websiteengine/pkg/config"
-	"websiteengine/internal/storage"
+	"websiteengine/pkg/storage"
 )
 
 type Store struct {

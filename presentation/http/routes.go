@@ -15,9 +15,9 @@ import (
 	"websiteengine/features/overview"
 	"websiteengine/features/releases"
 	"websiteengine/features/settings"
-	"websiteengine/internal/environment"
-	"websiteengine/internal/site"
-	"websiteengine/internal/transport/static"
+	"websiteengine/pkg/environment"
+	"websiteengine/pkg/site"
+	"websiteengine/pkg/static"
 	"websiteengine/presentation/http/middleware"
 	"websiteengine/presentation/http/response"
 )
