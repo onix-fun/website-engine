@@ -1,0 +1,335 @@
+package media
+
+import (
+	"bytes"
+	"context"
+	"errors"
+	"fmt"
+	"io"
+	"net/http"
+	"path/filepath"
+	"strings"
+	"time"
+	"unicode/utf8"
+
+	"github.com/google/uuid"
+
+	"websiteengine/internal/auth"
+	"websiteengine/internal/storage"
+)
+
+const cacheControl = "public, max-age=31536000, immutable"
+
+type Service struct {
+	repo      *Repository
+	store     storage.ObjectStore
+	maxUpload int64
+}
+
+func NewService(repo *Repository, store storage.ObjectStore, maxUpload int64) *Service {
+	return &Service{repo: repo, store: store, maxUpload: maxUpload}
+}
+
+func (s *Service) Upload(ctx context.Context, actor auth.Principal, filename string, data []byte) (Media, error) {
+	if len(data) == 0 {
+		return Media{}, &ValidationError{Message: "Файл пуст"}
+	}
+	if int64(len(data)) > s.maxUpload {
+		return Media{}, &ValidationError{Message: "Файл превышает допустимый размер"}
+	}
+	contentType := http.DetectContentType(data[:min(len(data), 512)])
+	ext, ok := allowedContentTypes[contentType]
+	if !ok {
+		return Media{}, &ValidationError{Message: "Неподдерживаемый тип файла"}
+	}
+	if isImage(contentType) {
+		if _, err := inspectImage(data); err != nil {
+			return Media{}, &ValidationError{Message: "Повреждённое или слишком большое изображение"}
+		}
+	}
+
+	filename = sanitizeFilename(filename)
+	creator := actor.TokenID
+	id := uuid.New()
+	objectKey := fmt.Sprintf("media/%s/original%s", id, ext)
+	m := Media{
+		ID: id, ObjectKey: objectKey, OriginalFilename: filename, ContentType: contentType,
+		SizeBytes: int64(len(data)), Status: "processing", Variants: map[string]string{},
+		UploadedBy: &creator,
+	}
+	_, err := s.repo.Create(ctx, m)
+	if err != nil {
+		return Media{}, err
+	}
+	if err := s.store.Put(ctx, objectKey, bytes.NewReader(data), int64(len(data)), storage.PutOptions{
+		ContentType: contentType, CacheControl: cacheControl,
+	}); err != nil {
+		_ = s.repo.SetFailed(context.Background(), id)
+		return Media{}, fmt.Errorf("upload original: %w", err)
+	}
+	variants := map[string]string{"original": objectKey}
+	if isImage(contentType) {
+		generated, err := buildImageVariants(ctx, s.store, id.String(), data, contentType)
+		if err != nil {
+			_ = s.repo.SetFailed(context.Background(), id)
+			return Media{}, fmt.Errorf("%w: %v", ErrProcessing, err)
+		}
+		for name, key := range generated {
+			variants[name] = key
+		}
+	}
+	ready, err := s.repo.SetReady(ctx, id, variants)
+	if err != nil {
+		return Media{}, err
+	}
+	return ready, nil
+}
+
+// ListFilters carries the optional media list filters.
+type ListFilters struct {
+	Status      string
+	Search      string
+	Type        string
+	CreatedFrom *time.Time
+	CreatedTo   *time.Time
+	MinSize     *int64
+	MaxSize     *int64
+	Sort        string
+}
+
+func (s *Service) List(ctx context.Context, f ListFilters, rawCursor string, limit int) ([]Media, string, error) {
+	if f.Status != "" {
+		switch f.Status {
+		case "processing", "ready", "failed", "deleted":
+		default:
+			return nil, "", &ValidationError{Message: "Некорректный status"}
+		}
+	}
+	sort := strings.TrimSpace(f.Sort)
+	switch sort {
+	case "", "new", "old", "name", "size_desc", "size_asc":
+	default:
+		return nil, "", &ValidationError{Message: "sort должен быть new, old, name, size_desc, size_asc"}
+	}
+	params := ListParams{
+		Status:             f.Status,
+		Search:             strings.TrimSpace(f.Search),
+		ContentTypePattern: "",
+		CreatedFrom:        f.CreatedFrom,
+		CreatedTo:          f.CreatedTo,
+		MinSize:            f.MinSize,
+		MaxSize:            f.MaxSize,
+		Sort:               sort,
+		Limit:              limit + 1,
+	}
+	pattern := ""
+	switch strings.TrimSpace(f.Type) {
+	case "":
+	case "image":
+		pattern = "image/%"
+	case "video":
+		pattern = "video/%"
+	case "pdf":
+		pattern = "application/pdf"
+	default:
+		return nil, "", &ValidationError{Message: "type должен быть image, video, pdf или пустым"}
+	}
+	params.ContentTypePattern = pattern
+	if rawCursor != "" {
+		c, ok := decodeCursor(rawCursor)
+		if !ok {
+			return nil, "", &ValidationError{Message: "Некорректный cursor"}
+		}
+		if c.Sort != sort {
+			return nil, "", &ValidationError{Message: "Курсор не соответствует выбранной сортировке"}
+		}
+		id := c.ID
+		params.CursorID = &id
+		switch sort {
+		case "name":
+			name := c.Name
+			params.CursorName = &name
+		case "size_desc", "size_asc":
+			size := c.Size
+			params.CursorSize = &size
+		default:
+			created := c.CreatedAt
+			params.CursorTime = &created
+		}
+	}
+	items, err := s.repo.List(ctx, params)
+	if err != nil {
+		return nil, "", err
+	}
+	next := ""
+	if len(items) > limit {
+		items = items[:limit]
+		last := items[len(items)-1]
+		next = encodeCursor(cursor{
+			Sort:      sort,
+			CreatedAt: last.CreatedAt,
+			Name:      last.OriginalFilename,
+			Size:      last.SizeBytes,
+			ID:        last.ID,
+		})
+	}
+	return items, next, nil
+}
+
+func (s *Service) Get(ctx context.Context, id uuid.UUID) (Media, error) {
+	return s.repo.Get(ctx, id)
+}
+
+// Rename changes the display name of a media object. Only the metadata in the
+// database changes: the object key stays intact so published content keeps
+// resolving to the same file.
+func (s *Service) Rename(ctx context.Context, id uuid.UUID, filename string) (Media, error) {
+	name := sanitizeFilename(filename)
+	if name == "file" && strings.TrimSpace(filename) == "" {
+		return Media{}, &ValidationError{Message: "Имя файла не может быть пустым"}
+	}
+	current, err := s.repo.Get(ctx, id)
+	if err != nil {
+		return Media{}, err
+	}
+	if current.Status == "deleted" {
+		return Media{}, &ConflictError{Message: "Объект удалён"}
+	}
+	return s.repo.Rename(ctx, id, name)
+}
+
+// Usage reports the content records that reference the media object.
+func (s *Service) Usage(ctx context.Context, id uuid.UUID) ([]Usage, error) {
+	if _, err := s.repo.Get(ctx, id); err != nil {
+		return nil, err
+	}
+	return s.repo.Usage(ctx, id, 100)
+}
+
+func (s *Service) Retry(ctx context.Context, id uuid.UUID) (Media, error) {
+	m, err := s.repo.Get(ctx, id)
+	if err != nil {
+		return Media{}, err
+	}
+	if m.Status == "deleted" {
+		return Media{}, &ConflictError{Message: "Объект удалён"}
+	}
+	if m.Status == "ready" {
+		return Media{}, &ConflictError{Message: "Объект уже обработан"}
+	}
+	if err := s.repo.SetProcessing(ctx, id); err != nil {
+		return Media{}, err
+	}
+	reader, err := s.store.Get(ctx, m.ObjectKey)
+	if err != nil {
+		_ = s.repo.SetFailed(context.Background(), id)
+		return Media{}, fmt.Errorf("%w: original object unavailable", ErrProcessing)
+	}
+	defer reader.Close()
+	data, err := io.ReadAll(io.LimitReader(reader, s.maxUpload+1))
+	if err != nil || int64(len(data)) > s.maxUpload {
+		_ = s.repo.SetFailed(context.Background(), id)
+		return Media{}, fmt.Errorf("%w: cannot read original", ErrProcessing)
+	}
+	variants := map[string]string{"original": m.ObjectKey}
+	if isImage(m.ContentType) {
+		generated, err := buildImageVariants(ctx, s.store, id.String(), data, m.ContentType)
+		if err != nil {
+			_ = s.repo.SetFailed(context.Background(), id)
+			return Media{}, fmt.Errorf("%w: %v", ErrProcessing, err)
+		}
+		for name, key := range generated {
+			variants[name] = key
+		}
+	}
+	return s.repo.SetReady(ctx, id, variants)
+}
+
+func (s *Service) Delete(ctx context.Context, id uuid.UUID) error {
+	m, err := s.repo.Get(ctx, id)
+	if err != nil {
+		return err
+	}
+	if m.Status == "deleted" {
+		return nil
+	}
+	keys := make(map[string]bool)
+	keys[m.ObjectKey] = true
+	for _, key := range m.Variants {
+		keys[key] = true
+	}
+	var errs []error
+	for key := range keys {
+		if err := s.store.Delete(ctx, key); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	if err := errors.Join(errs...); err != nil {
+		return fmt.Errorf("delete media objects: %w", err)
+	}
+	return s.repo.SetDeleted(ctx, id)
+}
+
+// RedirectURL returns only a URL built from database-owned S3 keys.
+func (s *Service) RedirectURL(ctx context.Context, id uuid.UUID, variant string) (string, error) {
+	m, err := s.repo.Get(ctx, id)
+	if err != nil {
+		return "", err
+	}
+	if m.Status != "ready" {
+		return "", ErrNotFound
+	}
+	if variant == "" {
+		variant = "original"
+	}
+	key, ok := m.Variants[variant]
+	if !ok {
+		return "", ErrNotFound
+	}
+	return s.store.PublicURL(key)
+}
+
+func (s *Service) Ready(ctx context.Context) error {
+	return s.store.Ready(ctx)
+}
+
+func isImage(contentType string) bool {
+	switch contentType {
+	case "image/jpeg", "image/png", "image/gif", "image/webp":
+		return true
+	}
+	return false
+}
+
+var allowedContentTypes = map[string]string{
+	"image/jpeg":      ".jpg",
+	"image/png":       ".png",
+	"image/gif":       ".gif",
+	"image/webp":      ".webp",
+	"application/pdf": ".pdf",
+	"video/mp4":       ".mp4",
+}
+
+func sanitizeFilename(name string) string {
+	name = strings.ReplaceAll(name, "\\", "/")
+	name = filepath.Base(name)
+	name = strings.TrimSpace(name)
+	if name == "" || name == "." || name == "/" {
+		name = "file"
+	}
+	if utf8.RuneCountInString(name) > 255 {
+		runes := []rune(name)
+		name = string(runes[:255])
+	}
+	return name
+}
+
+type ValidationError struct{ Message string }
+
+func (e *ValidationError) Error() string { return e.Message }
+func (e *ValidationError) Unwrap() error { return ErrValidation }
+
+type ConflictError struct{ Message string }
+
+func (e *ConflictError) Error() string { return e.Message }
+func (e *ConflictError) Unwrap() error { return ErrConflict }

@@ -1,0 +1,8 @@
+.env
+*.log
+.DS_Store
+.gocache/
+frontend/node_modules/
+.pnpm-store/
+frontend/dist/
+internal/transport/static/dist/assets/
