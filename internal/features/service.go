@@ -12,11 +12,11 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgconn"
 
-	"websiteengine/internal/auth"
+	"websiteengine/features/auth"
 	"websiteengine/internal/environment"
 	"websiteengine/internal/platform/validate"
 	"websiteengine/internal/publication"
-	"websiteengine/internal/transport/http/response"
+	"websiteengine/presentation/http/response"
 )
 
 var keyPattern = regexp.MustCompile(`^[a-z][a-z0-9_-]{0,99}$`)

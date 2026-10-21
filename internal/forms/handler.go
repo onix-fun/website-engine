@@ -15,10 +15,10 @@ import (
 
 	"github.com/google/uuid"
 
-	"websiteengine/internal/auth"
+	"websiteengine/features/auth"
 	"websiteengine/internal/environment"
-	"websiteengine/internal/features"
-	"websiteengine/internal/transport/http/response"
+	"websiteengine/features/features"
+	"websiteengine/presentation/http/response"
 )
 
 type Handler struct {

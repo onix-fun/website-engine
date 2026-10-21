@@ -15,7 +15,7 @@ import (
 	"github.com/google/uuid"
 
 	"websiteengine/internal/artifact"
-	"websiteengine/internal/auth"
+	"websiteengine/features/auth"
 	"websiteengine/internal/environment"
 	"websiteengine/internal/secrets"
 	"websiteengine/internal/storage"

@@ -13,9 +13,9 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 
 	"websiteengine/internal/environment"
-	"websiteengine/internal/features"
+	"websiteengine/features/features"
 	"websiteengine/internal/platform/validate"
-	"websiteengine/internal/transport/http/response"
+	"websiteengine/presentation/http/response"
 )
 
 type ValidationError struct {

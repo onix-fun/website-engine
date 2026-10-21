@@ -11,23 +11,23 @@ import (
 	"syscall"
 	"time"
 
-	"websiteengine/internal/auth"
-	"websiteengine/internal/config"
-	"websiteengine/internal/content"
-	"websiteengine/internal/database"
+	"websiteengine/features/auth"
+	"websiteengine/features/content"
+	"websiteengine/features/features"
+	"websiteengine/features/forms"
+	"websiteengine/features/media"
+	"websiteengine/features/overview"
+	"websiteengine/features/releases"
+	"websiteengine/features/settings"
 	"websiteengine/internal/environment"
-	"websiteengine/internal/features"
-	"websiteengine/internal/forms"
-	"websiteengine/internal/media"
-	"websiteengine/internal/overview"
-	"websiteengine/internal/releases"
 	"websiteengine/internal/secrets"
-	"websiteengine/internal/settings"
 	"websiteengine/internal/site"
 	"websiteengine/internal/storage/s3"
-	httptransport "websiteengine/internal/transport/http"
-	"websiteengine/internal/transport/http/middleware"
 	"websiteengine/migrations"
+	"websiteengine/pkg/config"
+	"websiteengine/pkg/postgres"
+	httptransport "websiteengine/presentation/http"
+	"websiteengine/presentation/http/middleware"
 )
 
 // run starts the API server. The page-size constants mirror the limits that
@@ -68,14 +68,14 @@ func run(log *slog.Logger) error {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	pool, err := database.Open(ctx, cfg.DatabaseURL)
+	pool, err := postgres.Open(ctx, cfg.DatabaseURL)
 	if err != nil {
 		return err
 	}
 	defer pool.Close()
 
 	if cfg.MigrateOnStart {
-		if err := database.Migrate(ctx, pool, migrations.FS); err != nil {
+		if err := postgres.Migrate(ctx, pool, migrations.FS); err != nil {
 			return fmt.Errorf("migrations: %w", err)
 		}
 		log.Info("database migrations applied")

@@ -5,7 +5,7 @@ import (
 	"log/slog"
 	"net/http"
 
-	"websiteengine/internal/transport/http/response"
+	"websiteengine/presentation/http/response"
 )
 
 type Handler struct {

@@ -14,7 +14,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/aws/smithy-go"
 
-	"websiteengine/internal/config"
+	"websiteengine/pkg/config"
 	"websiteengine/internal/storage"
 )
 

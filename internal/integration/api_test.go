@@ -21,16 +21,16 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"websiteengine/internal/auth"
-	"websiteengine/internal/content"
-	"websiteengine/internal/database"
-	"websiteengine/internal/features"
-	"websiteengine/internal/forms"
-	"websiteengine/internal/media"
-	"websiteengine/internal/overview"
-	"websiteengine/internal/settings"
+	"websiteengine/features/auth"
+	"websiteengine/features/content"
+	"websiteengine/pkg/postgres"
+	"websiteengine/features/features"
+	"websiteengine/features/forms"
+	"websiteengine/features/media"
+	"websiteengine/features/overview"
+	"websiteengine/features/settings"
 	"websiteengine/internal/storage"
-	httptransport "websiteengine/internal/transport/http"
+	httptransport "websiteengine/presentation/http"
 	"websiteengine/migrations"
 )
 
@@ -94,12 +94,12 @@ func newTestEnv(t *testing.T) *testEnv {
 		t.Skip("TEST_DATABASE_URL is not set")
 	}
 	ctx := context.Background()
-	pool, err := database.Open(ctx, dbURL)
+	pool, err := postgres.Open(ctx, dbURL)
 	if err != nil {
 		t.Fatalf("open database: %v", err)
 	}
 	t.Cleanup(pool.Close)
-	if err := database.Migrate(ctx, pool, migrations.FS); err != nil {
+	if err := postgres.Migrate(ctx, pool, migrations.FS); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
 	if _, err := pool.Exec(ctx, `TRUNCATE media_objects, form_submissions, feature_entry_versions,

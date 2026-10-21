@@ -14,7 +14,7 @@ import (
 
 	"github.com/google/uuid"
 
-	"websiteengine/internal/auth"
+	"websiteengine/features/auth"
 	"websiteengine/internal/storage"
 )
 

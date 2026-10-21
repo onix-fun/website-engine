@@ -9,9 +9,9 @@ import (
 
 	"github.com/google/uuid"
 
-	"websiteengine/internal/auth"
+	"websiteengine/features/auth"
 	"websiteengine/internal/environment"
-	"websiteengine/internal/transport/http/response"
+	"websiteengine/presentation/http/response"
 )
 
 type Handler struct {

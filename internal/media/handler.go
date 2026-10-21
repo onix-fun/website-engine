@@ -13,8 +13,8 @@ import (
 
 	"github.com/google/uuid"
 
-	"websiteengine/internal/auth"
-	"websiteengine/internal/transport/http/response"
+	"websiteengine/features/auth"
+	"websiteengine/presentation/http/response"
 )
 
 type Handler struct {

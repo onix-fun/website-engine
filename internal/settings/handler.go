@@ -10,7 +10,7 @@ package settings
 import (
 	"net/http"
 
-	"websiteengine/internal/transport/http/response"
+	"websiteengine/presentation/http/response"
 )
 
 // Limits mirrors the request and pagination limits enforced by the server.
