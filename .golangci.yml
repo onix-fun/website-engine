@@ -1,0 +1,37 @@
+run:
+  timeout: 5m
+
+linters:
+  enable:
+    - depguard
+
+linters-settings:
+  depguard:
+    rules:
+      features:
+        files:
+          - "**/features/**"
+        deny:
+          - pkg: "websiteengine/presentation/**"
+            desc: "features must not depend on presentation layer"
+          - pkg: "net/http"
+            desc: "features must not depend on http transport"
+      presentation:
+        files:
+          - "**/presentation/**"
+        deny:
+          - pkg: "websiteengine/pkg/postgres"
+            desc: "presentation must not access database directly"
+          - pkg: "database/sql"
+            desc: "presentation must not access database directly"
+          - pkg: "github.com/jackc/pgx/v5"
+            desc: "presentation must not access database directly"
+      infra:
+        files:
+          - "**/pkg/**"
+          - "**/internal/database/**"
+        deny:
+          - pkg: "websiteengine/features/**"
+            desc: "infrastructure must not depend on features"
+          - pkg: "websiteengine/presentation/**"
+            desc: "infrastructure must not depend on presentation"
