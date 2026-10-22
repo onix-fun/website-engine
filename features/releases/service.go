@@ -234,8 +234,13 @@ func (s *Service) CreateSource(ctx context.Context, actor principal.Principal, i
 	if in.Provider != "manual" && in.Provider != "github" && in.Provider != "gitlab" && in.Provider != "gitea" {
 		return Source{}, errors.New("provider must be manual, github, gitlab or gitea")
 	}
-	if in.Provider != "manual" && !strings.HasPrefix(in.RepoURL, "https://") {
-		return Source{}, errors.New("repo_url must be an absolute https URL")
+	if in.Provider != "manual" {
+		if strings.HasPrefix(in.RepoURL, "http://") && !releaseprovider.InsecureSourcesAllowed() {
+			return Source{}, errors.New("repo_url must be an absolute https URL (http requires RELEASE_SOURCE_ALLOW_INSECURE)")
+		}
+		if !strings.HasPrefix(in.RepoURL, "https://") && !strings.HasPrefix(in.RepoURL, "http://") {
+			return Source{}, errors.New("repo_url must be an absolute https URL")
+		}
 	}
 	var ciphertext, nonce []byte
 	var err error

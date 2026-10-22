@@ -65,6 +65,8 @@ services:
       # 32-byte AES key (base64). Replace in production.
       RELEASE_MASTER_KEY: ${RELEASE_MASTER_KEY:-MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=}
       MAX_RELEASE_BYTES: "268435456"
+      RELEASE_SOURCE_HOSTS: ${RELEASE_SOURCE_HOSTS:-}
+      RELEASE_SOURCE_ALLOW_INSECURE: ${RELEASE_SOURCE_ALLOW_INSECURE:-false}
       # TLS/ACME: enable by setting TLS_ENABLED=true in the .env file and
       # adding ports "443:443" and "80:80" to the server service.
       TLS_ENABLED: ${TLS_ENABLED:-false}

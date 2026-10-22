@@ -6,16 +6,16 @@ import (
 )
 
 type ReleaseAsset struct {
-	TagName            string
-	Name               string
-	BrowserDownloadURL string
-	Size               int64
+	TagName            string `json:"-"`
+	Name               string `json:"name"`
+	BrowserDownloadURL string `json:"browser_download_url"`
+	Size               int64  `json:"size"`
 }
 
 type Release struct {
-	TagName     string
-	Assets      []ReleaseAsset
-	PublishedAt string
+	TagName     string         `json:"tag_name"`
+	Assets      []ReleaseAsset `json:"assets"`
+	PublishedAt string         `json:"published_at,omitempty"`
 }
 
 type Provider interface {

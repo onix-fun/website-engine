@@ -129,7 +129,7 @@ func ListEvents(ctx context.Context, db Lister, p ListParams) ([]EventRow, strin
 		return nil, "", err
 	}
 	defer rows.Close()
-	var out []EventRow
+	out := []EventRow{}
 	for rows.Next() {
 		var ev EventRow
 		if err := rows.Scan(&ev.ID, &ev.EntityKind, &ev.FeatureID, &ev.FeatureKey, &ev.EntryID,

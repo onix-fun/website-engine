@@ -28,3 +28,7 @@ func Configure(extraAllowedHosts []string, allowInsecureSources bool) {
 	}
 	allowInsecure = allowInsecureSources
 }
+
+// InsecureSourcesAllowed reports whether plain http:// source URLs are
+// currently permitted (local development only).
+func InsecureSourcesAllowed() bool { return allowInsecure }
