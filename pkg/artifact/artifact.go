@@ -59,6 +59,13 @@ func Extract(zipPath, dir string, limits Limits) (Manifest, error) {
 		if name == "" || name == "." || strings.HasPrefix(name, "../") || strings.Contains(name, "/../") {
 			return Manifest{}, fmt.Errorf("unsafe archive path %q", zf.Name)
 		}
+		// Any entry whose path climbs directories is rejected outright:
+		// silent remapping would hide a tampered layout from operators.
+		for _, seg := range strings.Split(strings.ReplaceAll(zf.Name, "\\", "/"), "/") {
+			if seg == ".." {
+				return Manifest{}, fmt.Errorf("unsafe archive path %q", zf.Name)
+			}
+		}
 		if zf.Mode()&os.ModeSymlink != 0 {
 			return Manifest{}, fmt.Errorf("symlink entries are not allowed: %q", zf.Name)
 		}

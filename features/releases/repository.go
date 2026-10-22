@@ -180,30 +180,37 @@ func (r *Repository) Environments(ctx context.Context) ([]EnvironmentState, erro
 
 // UpdateEnvironment applies the editable environment settings when the
 // caller-supplied revision matches; otherwise it returns the current revision
-// so the caller can retry.
+// so the caller can retry. Only the fields the caller provided are updated:
+// name, public base URL, domains, CORS origins and the TLS flag.
 func (r *Repository) UpdateEnvironment(ctx context.Context, env environment.Environment,
-	name, publicBaseURL string, domains, corsOrigins []string, tlsEnabled *bool, revision int64) (EnvironmentState, error) {
-	if domains == nil {
-		domains = []string{}
+	name, publicBaseURL *string, domains, corsOrigins *[]string, tlsEnabled *bool, revision int64) (EnvironmentState, error) {
+	sets := "revision = revision + 1, updated_at = now()"
+	args := []any{}
+	add := func(column string, v any) {
+		args = append(args, v)
+		sets += fmt.Sprintf(", %s = $%d", column, len(args))
 	}
-	if corsOrigins == nil {
-		corsOrigins = []string{}
+	if name != nil {
+		add("name", *name)
 	}
-	args := []any{name, publicBaseURL, domains, corsOrigins, revision}
-	sets := `name = $1,
-		       public_base_url = $2,
-		       domains = $3,
-		       cors_origins = $4,
-		       revision = revision + 1,
-		       updated_at = now()`
+	if publicBaseURL != nil {
+		add("public_base_url", *publicBaseURL)
+	}
+	if domains != nil {
+		add("domains", *domains)
+	}
+	if corsOrigins != nil {
+		add("cors_origins", *corsOrigins)
+	}
 	if tlsEnabled != nil {
-		args = append(args, *tlsEnabled)
-		sets += `, tls_enabled = $6`
+		add("tls_enabled", *tlsEnabled)
 	}
+	args = append(args, revision)
+	revArg := len(args)
 	args = append(args, env.String())
-	n := len(args)
-	tag, err := r.pool.Exec(ctx, `
-		UPDATE site_environments SET `+sets+` WHERE key = $`+fmt.Sprintf("%d", n)+` AND revision = $5`, args...)
+	keyArg := len(args)
+	tag, err := r.pool.Exec(ctx, `UPDATE site_environments SET `+sets+
+		` WHERE key = $`+fmt.Sprintf("%d", keyArg)+` AND revision = $`+fmt.Sprintf("%d", revArg), args...)
 	if err != nil {
 		return EnvironmentState{}, err
 	}
@@ -211,6 +218,9 @@ func (r *Repository) UpdateEnvironment(ctx context.Context, env environment.Envi
 		var current int64
 		if err := r.pool.QueryRow(ctx,
 			`SELECT revision FROM site_environments WHERE key = $1`, env.String()).Scan(&current); err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return EnvironmentState{}, ErrNotFound
+			}
 			return EnvironmentState{}, err
 		}
 		return EnvironmentState{}, &envConflict{current: current}

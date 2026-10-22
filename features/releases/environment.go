@@ -67,28 +67,29 @@ func (s *Service) UpdateEnvironment(ctx context.Context, env environment.Environ
 	if !env.Valid() {
 		return EnvironmentState{}, &ValidationError{Message: "environment must be dev or prod"}
 	}
-	name := ""
+	var name, base *string
 	if in.Name != nil {
-		name = sanitizeName(*in.Name)
-		if name == "" {
+		clean := sanitizeName(*in.Name)
+		if clean == "" {
 			return EnvironmentState{}, &ValidationError{Message: "name must be 1-200 characters"}
 		}
+		name = &clean
 	}
-	base := ""
 	if in.PublicBaseURL != nil {
 		trimmed := strings.TrimSpace(*in.PublicBaseURL)
-		if trimmed == "" {
-			base = ""
-		} else {
+		clean := ""
+		if trimmed != "" {
 			u, err := url.Parse(trimmed)
 			if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" || u.RawQuery != "" || u.Fragment != "" {
 				return EnvironmentState{}, &ValidationError{Message: "public_base_url must be an absolute http(s) URL"}
 			}
-			base = strings.TrimRight(u.Scheme+"://"+u.Host, "/") + u.Path
+			clean = strings.TrimRight(u.Scheme+"://"+u.Host, "/") + u.Path
 		}
+		base = &clean
 	}
-	domains := make([]string, 0, domainLimit)
+	var domains, origins *[]string
 	if in.Domains != nil {
+		list := make([]string, 0, domainLimit)
 		for _, d := range *in.Domains {
 			d = sanitizeDomain(d)
 			if d == "" {
@@ -97,16 +98,17 @@ func (s *Service) UpdateEnvironment(ctx context.Context, env environment.Environ
 			if len(d) > 253 {
 				return EnvironmentState{}, &ValidationError{Message: fmt.Sprintf("domain %q is too long", d)}
 			}
-			if len(domains) >= domainLimit {
+			if len(list) >= domainLimit {
 				return EnvironmentState{}, &ValidationError{Message: fmt.Sprintf("at most %d domains are allowed", domainLimit)}
 			}
-			if !slices.Contains(domains, d) {
-				domains = append(domains, d)
+			if !slices.Contains(list, d) {
+				list = append(list, d)
 			}
 		}
+		domains = &list
 	}
-	origins := make([]string, 0, domainLimit)
 	if in.CORSOrigins != nil {
+		list := make([]string, 0, domainLimit)
 		for _, o := range *in.CORSOrigins {
 			o = strings.TrimRight(strings.TrimSpace(o), "/")
 			if o == "" {
@@ -119,19 +121,22 @@ func (s *Service) UpdateEnvironment(ctx context.Context, env environment.Environ
 				}
 				o = strings.TrimRight(u.Scheme+"://"+u.Host, "/") + strings.TrimSuffix(u.Path, "/")
 			}
-			if len(origins) >= domainLimit {
+			if len(list) >= domainLimit {
 				return EnvironmentState{}, &ValidationError{Message: fmt.Sprintf("at most %d CORS origins are allowed", domainLimit)}
 			}
-			if !slices.Contains(origins, o) {
-				origins = append(origins, o)
+			if !slices.Contains(list, o) {
+				list = append(list, o)
 			}
 		}
+		origins = &list
 	}
 
 	// Domains must be unique across environments; otherwise HTTPS routing
 	// would be ambiguous (two sites for one host).
-	if err := s.failIfDuplicateDomains(ctx, env, domains); err != nil {
-		return EnvironmentState{}, err
+	if domains != nil {
+		if err := s.failIfDuplicateDomains(ctx, env, *domains); err != nil {
+			return EnvironmentState{}, err
+		}
 	}
 
 	updated, err := s.repo.UpdateEnvironment(ctx, env, name, base, domains, origins, in.TLSEnabled, in.Revision)

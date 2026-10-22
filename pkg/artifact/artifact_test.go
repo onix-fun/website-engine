@@ -111,7 +111,7 @@ func TestExtractEmptyArchive(t *testing.T) {
 	}
 }
 
-func TestExtractTraversalEntriesStaysInsideDir(t *testing.T) {
+func TestExtractRejectsTraversalEntries(t *testing.T) {
 	cases := []string{"../escape.txt", "..\\..\\escape.txt", "sub/../../../escape.txt"}
 	for _, name := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -121,8 +121,8 @@ func TestExtractTraversalEntriesStaysInsideDir(t *testing.T) {
 				[]zip.FileHeader{header("index.html"), header(name)},
 				[][]byte{[]byte("ok"), []byte("escaped")})
 			_, err := Extract(src, out, DefaultLimits())
-			if err != nil {
-				t.Fatalf("extract with %q: %v", name, err)
+			if err == nil || !strings.Contains(err.Error(), "unsafe") {
+				t.Fatalf("expected traversal rejection, got %v", err)
 			}
 			// Nothing may have been written outside the staging directory.
 			entries, err := os.ReadDir(root)
@@ -134,16 +134,13 @@ func TestExtractTraversalEntriesStaysInsideDir(t *testing.T) {
 					t.Fatalf("traversal wrote %q outside the staging dir", e.Name())
 				}
 			}
-			if _, err := os.Stat(filepath.Join(out, "escape.txt")); err != nil {
-				t.Fatalf("expected remapped entry inside staging dir: %v", err)
-			}
 		})
 	}
 }
 
 func TestExtractDuplicatePath(t *testing.T) {
 	src := buildZip(t, t.TempDir(),
-		[]zip.FileHeader{header("index.html"), header("a/../index.html")},
+		[]zip.FileHeader{header("index.html"), header("index.html")},
 		[][]byte{[]byte("one"), []byte("two")})
 	_, err := Extract(src, t.TempDir(), DefaultLimits())
 	if err == nil || !strings.Contains(err.Error(), "duplicate") {

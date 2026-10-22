@@ -205,22 +205,22 @@ draft ──publish──> dev ──promote──> prod
 - [x] Миграции и инварианты указателей
 - [x] Publish dev / promote prod / rollback / unpublish схем
 - [x] Publish dev / promote prod / rollback / unpublish записей
-- [ ] Запрет `prod > dev`
-- [ ] Запрет dev-unpublish при активном prod
-- [ ] Валидация контента при смене схемы
-- [ ] Изоляция публичного API по средам
-- [ ] Private-поля при расхождении схем
-- [ ] Формы: схема и заявки по средам
-- [ ] CORS per environment
-- [ ] Матрица прав user/moderator/admin
-- [ ] Импорт артефакта: корректный zip
-- [ ] Импорт артефакта: нет `index.html`
-- [ ] Импорт артефакта: path traversal
-- [ ] Импорт артефакта: symlink
-- [ ] Импорт артефакта: zip-bomb и лимиты
-- [ ] Активация/rollback и снимок версий в событии
-- [ ] Шифрование/расшифровка токенов провайдеров
-- [ ] Fake Git-провайдер через `httptest`
+- [x] Запрет `prod > dev`
+- [x] Запрет dev-unpublish при активном prod
+- [x] Валидация контента при смене схемы
+- [x] Изоляция публичного API по средам
+- [x] Private-поля при расхождении схем
+- [x] Формы: схема и заявки по средам
+- [x] CORS per environment
+- [x] Матрица прав user/moderator/admin
+- [x] Импорт артефакта: корректный zip
+- [x] Импорт артефакта: нет `index.html`
+- [x] Импорт артефакта: path traversal
+- [x] Импорт артефакта: symlink
+- [x] Импорт артефакта: zip-bomb и лимиты
+- [x] Активация/rollback и снимок версий в событии
+- [x] Шифрование/расшифровка токенов провайдеров
+- [x] Fake Git-провайдер через `httptest`
 - [ ] Frontend `pnpm typecheck`
 - [ ] Frontend `pnpm build`
 
