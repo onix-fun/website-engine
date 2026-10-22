@@ -84,6 +84,25 @@ func Migrate(ctx context.Context, pool *pgxpool.Pool, fsys fs.FS) error {
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("database: commit migrations: %w", err)
 	}
+	if err := SeedDefaults(ctx, pool); err != nil {
+		return fmt.Errorf("database: seed defaults: %w", err)
+	}
+	return nil
+}
+
+// SeedDefaults creates the rows every deployment needs: the site settings
+// singleton and the dev/prod environment rows behind CORS routing, release
+// activation and HTTPS SNI routing. Idempotent; safe after truncate too.
+func SeedDefaults(ctx context.Context, pool *pgxpool.Pool) error {
+	if _, err := pool.Exec(ctx, `INSERT INTO site_settings (id) VALUES (TRUE) ON CONFLICT (id) DO NOTHING`); err != nil {
+		return fmt.Errorf("seed site settings: %w", err)
+	}
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO site_environments (key, name, http_port)
+		VALUES ('dev', 'Development', 8081), ('prod', 'Production', 8082)
+		ON CONFLICT (key) DO NOTHING`); err != nil {
+		return fmt.Errorf("seed site environments: %w", err)
+	}
 	return nil
 }
 

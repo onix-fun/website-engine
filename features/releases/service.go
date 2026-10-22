@@ -135,9 +135,13 @@ func (s *Service) Activate(ctx context.Context, actor principal.Principal, env e
 		return Release{}, err
 	}
 	action := "activate"
+	metadata, err := s.eventMetadata(ctx, rel)
+	if err != nil {
+		return Release{}, err
+	}
 	if err := s.repo.InsertEvent(ctx, Event{
 		ID: uuid.New(), ReleaseID: &releaseID, Environment: env, Action: action,
-		ActorID: &actor.TokenID, Metadata: json.RawMessage(`{}`),
+		ActorID: &actor.TokenID, Metadata: metadata,
 	}); err != nil {
 		return Release{}, err
 	}
@@ -155,13 +159,35 @@ func (s *Service) Rollback(ctx context.Context, actor principal.Principal, env e
 	if err := s.repo.SetActive(ctx, env, releaseID); err != nil {
 		return Release{}, err
 	}
+	metadata, err := s.eventMetadata(ctx, rel)
+	if err != nil {
+		return Release{}, err
+	}
 	if err := s.repo.InsertEvent(ctx, Event{
 		ID: uuid.New(), ReleaseID: &releaseID, Environment: env, Action: "rollback",
-		ActorID: &actor.TokenID, Metadata: json.RawMessage(`{}`),
+		ActorID: &actor.TokenID, Metadata: metadata,
 	}); err != nil {
 		return Release{}, err
 	}
 	return rel, nil
+}
+
+// eventMetadata builds the release_events.metadata payload: a snapshot of the
+// feature versions the environments pointed to right after the activation or
+// rollback. The CHECK constraint requires a JSON object.
+func (s *Service) eventMetadata(ctx context.Context, rel Release) (json.RawMessage, error) {
+	snapshot, err := s.repo.FeatureVersionsSnapshot(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("snapshot feature versions: %w", err)
+	}
+	raw, err := json.Marshal(map[string]any{
+		"release_version":  rel.Version,
+		"feature_versions": snapshot,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return json.RawMessage(raw), nil
 }
 
 func (s *Service) List(ctx context.Context, beforeTime *time.Time, beforeID *uuid.UUID, limit int) ([]Release, string, error) {

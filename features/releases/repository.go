@@ -266,3 +266,47 @@ func (r *Repository) DeleteSource(ctx context.Context, id uuid.UUID) error {
 	}
 	return nil
 }
+
+// FeatureVersionSnapshot is one feature's version pointers at activation
+// time. Versions are the feature_versions.version numbers the environment
+// pointed to; nil means the environment has no published schema yet.
+type FeatureVersionSnapshot struct {
+	Key         string `json:"key"`
+	Type        string `json:"type"`
+	DevVersion  *int64 `json:"dev_version"`
+	ProdVersion *int64 `json:"prod_version"`
+}
+
+// FeatureVersionsSnapshot captures the active features' version pointers at
+// the moment of an activation or rollback. The release_events.metadata
+// column stores it so operators can audit what the site actually served.
+func (r *Repository) FeatureVersionsSnapshot(ctx context.Context) (json.RawMessage, error) {
+	rows, err := r.pool.Query(ctx, `
+		SELECT f.key, f.type,
+		       dv.version, pv.version
+		  FROM features f
+		  LEFT JOIN feature_versions dv ON dv.id = f.dev_version_id
+		  LEFT JOIN feature_versions pv ON pv.id = f.prod_version_id
+		 WHERE f.status = 'active'
+		 ORDER BY f.key`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	features := []FeatureVersionSnapshot{}
+	for rows.Next() {
+		var snap FeatureVersionSnapshot
+		if err := rows.Scan(&snap.Key, &snap.Type, &snap.DevVersion, &snap.ProdVersion); err != nil {
+			return nil, err
+		}
+		features = append(features, snap)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	raw, err := json.Marshal(map[string]any{"features": features})
+	if err != nil {
+		return nil, err
+	}
+	return json.RawMessage(raw), nil
+}
