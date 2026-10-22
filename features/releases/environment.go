@@ -128,6 +128,12 @@ func (s *Service) UpdateEnvironment(ctx context.Context, env environment.Environ
 		}
 	}
 
+	// Domains must be unique across environments; otherwise HTTPS routing
+	// would be ambiguous (two sites for one host).
+	if err := s.failIfDuplicateDomains(ctx, env, domains); err != nil {
+		return EnvironmentState{}, err
+	}
+
 	updated, err := s.repo.UpdateEnvironment(ctx, env, name, base, domains, origins, in.TLSEnabled, in.Revision)
 	if err != nil {
 		return EnvironmentState{}, err
@@ -135,6 +141,32 @@ func (s *Service) UpdateEnvironment(ctx context.Context, env environment.Environ
 	// The CORS cache must not serve stale origins after an update.
 	s.cors.Invalidate()
 	return updated, nil
+}
+
+// failIfDuplicateDomains rejects hosts already routed to another environment.
+func (s *Service) failIfDuplicateDomains(ctx context.Context, env environment.Environment, domains []string) error {
+	if len(domains) == 0 {
+		return nil
+	}
+	states, err := s.repo.Environments(ctx)
+	if err != nil {
+		return err
+	}
+	for _, st := range states {
+		if st.Key == env {
+			continue
+		}
+		for _, existing := range st.Domains {
+			for _, candidate := range domains {
+				if strings.EqualFold(existing, candidate) {
+					return &ValidationError{
+						Message: fmt.Sprintf("domain %q already belongs to the %s environment", candidate, st.Key),
+					}
+				}
+			}
+		}
+	}
+	return nil
 }
 
 func sanitizeName(raw string) string {

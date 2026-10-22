@@ -22,6 +22,7 @@ import (
 	"websiteengine/migrations"
 	"websiteengine/pkg/config"
 	"websiteengine/pkg/environment"
+	"websiteengine/pkg/https"
 	"websiteengine/pkg/postgres"
 	"websiteengine/pkg/secrets"
 	"websiteengine/pkg/site"
@@ -214,11 +215,35 @@ func run(log *slog.Logger) error {
 		newServer(cfg.DevHTTPAddr, httptransport.NewPublicRouter(deps, environment.Dev, devBaseURL), cfg),
 		newServer(cfg.ProdHTTPAddr, httptransport.NewPublicRouter(deps, environment.Prod, prodBaseURL), cfg),
 	}
+
+	var tlsRouter *https.Router
+	if cfg.TLS.Enabled {
+		devPublic := httptransport.NewPublicRouter(deps, environment.Dev, devBaseURL)
+		prodPublic := httptransport.NewPublicRouter(deps, environment.Prod, prodBaseURL)
+		tlsRouter, err = https.NewRouter(cfg.TLS, environmentDomains{service: releaseService}, map[environment.Environment]http.Handler{
+			environment.Dev:  devPublic,
+			environment.Prod: prodPublic,
+		}, log)
+		if err != nil {
+			return fmt.Errorf("TLS router: %w", err)
+		}
+		tlsRouter.Start(ctx)
+		httpsServer := tlsRouter.HTTPSServer(cfg.TLS.HTTPSAddr)
+		httpsServer.ReadTimeout = cfg.ReadHeaderTimeout * 20
+		httpsServer.WriteTimeout = 2 * time.Minute
+		httpsServer.IdleTimeout = 120 * time.Second
+		acmeServer := tlsRouter.HTTP01Server(cfg.TLS.HTTPAddr)
+		servers = append(servers, httpsServer, acmeServer)
+	}
 	errCh := make(chan error, len(servers))
 	for _, server := range servers {
 		server := server
 		go func() {
 			log.Info("HTTP server listening", "addr", server.Addr)
+			if server.TLSConfig != nil {
+				errCh <- server.ListenAndServeTLS("", "")
+				return
+			}
 			errCh <- server.ListenAndServe()
 		}()
 	}
@@ -243,6 +268,27 @@ func run(log *slog.Logger) error {
 		}
 		return err
 	}
+}
+
+// environmentDomains adapts the releases feature into the pkg/https domain
+// contract: site_environments stays the single source of truth for routing.
+type environmentDomains struct {
+	service *releases.Service
+}
+
+func (l environmentDomains) ListDomains(ctx context.Context) ([]https.DomainEntry, error) {
+	states, err := l.service.Environments(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]https.DomainEntry, 0, len(states))
+	for _, st := range states {
+		if len(st.Domains) == 0 {
+			continue
+		}
+		out = append(out, https.DomainEntry{Env: st.Key, Domains: st.Domains})
+	}
+	return out, nil
 }
 
 func newServer(addr string, handler http.Handler, cfg config.Config) *http.Server {

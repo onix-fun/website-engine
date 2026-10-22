@@ -14,7 +14,7 @@ vendors:
   uuid:       { in: github.com/google/uuid }
   jsonschema: { in: github.com/santhosh-tekuri/jsonschema }
   ximage:     { in: golang.org/x/image }
-  xcrypto:    { in: golang.org/x/crypto }
+  xcrypto:    { in: golang.org/x/crypto/** }
   jwt:        { in: github.com/golang-jwt }
 
 components:
@@ -28,6 +28,7 @@ components:
   pkg_storage:     { in: pkg/storage }
   pkg_s3:          { in: pkg/storage/s3 }
   pkg_static:      { in: pkg/static }
+  pkg_https:       { in: pkg/https }
   pkg_validate:    { in: pkg/platform/validate }
   pkg_models:      { in: pkg/models }
   pkg_response:    { in: pkg/response }
@@ -70,7 +71,10 @@ deps:
   pkg_site:        { mayDependOn: [pkg_environment, pkg_storage], anyVendorDeps: true, deepScan: false }
   pkg_storage:     { mayDependOn: [pkg_environment], anyVendorDeps: true }
   pkg_s3:          { mayDependOn: [pkg_storage, pkg_environment, pkg_config], anyVendorDeps: true, deepScan: false }
-  pkg_static:      { anyVendorDeps: true }
+  pkg_static:      { mayDependOn: [], anyVendorDeps: true }
+  # deepScan: false — NewRouter receives the cmd-level domain adapter; the
+  # linter derives a false cmd→pkg_https DI edge from the composition root.
+  pkg_https:       { mayDependOn: [pkg_config, pkg_environment], canUse: [xcrypto], anyVendorDeps: false, deepScan: false }
   pkg_validate:    { anyVendorDeps: true }
   pkg_models:      { anyVendorDeps: true }
   pkg_response:    { anyVendorDeps: true }
@@ -99,7 +103,7 @@ deps:
   routes:     { mayDependOn: [pkg_site, pkg_static, pkg_response, handlers, middleware, feat_auth, feat_features, feat_content, feat_forms, feat_media, feat_overview, feat_releases], anyVendorDeps: true }
   presentation: { anyVendorDeps: true }
 
-  cmd_api:   { mayDependOn: [pkg_config, pkg_postgres, pkg_site, pkg_storage, pkg_secrets, pkg_static, pkg_environment, pkg_publication, pkg_artifact, pkg_validate, pkg_models, pkg_s3, migrations, feat_auth, feat_features, feat_content, feat_forms, feat_media, feat_overview, feat_releases, feat_settings, routes, handlers], anyVendorDeps: true }
+  cmd_api:   { mayDependOn: [pkg_config, pkg_postgres, pkg_site, pkg_storage, pkg_secrets, pkg_static, pkg_environment, pkg_publication, pkg_artifact, pkg_validate, pkg_models, pkg_s3, pkg_https, migrations, feat_auth, feat_features, feat_content, feat_forms, feat_media, feat_overview, feat_releases, feat_settings, routes, handlers], anyVendorDeps: true }
   cmd_atlas: { mayDependOn: [pkg_models], anyVendorDeps: true }
   cmd_integ: { mayDependOn: [pkg_config, pkg_postgres, pkg_site, pkg_storage, pkg_models, migrations, feat_auth, feat_features, feat_content, feat_forms, feat_media, feat_overview, feat_releases, routes, handlers], anyVendorDeps: true }
 
