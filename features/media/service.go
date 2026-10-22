@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -308,6 +309,25 @@ var allowedContentTypes = map[string]string{
 	"image/webp":      ".webp",
 	"application/pdf": ".pdf",
 	"video/mp4":       ".mp4",
+}
+
+// AcceptedContentTypes lists the content types accepted by the upload API.
+func AcceptedContentTypes() []string {
+	types := make([]string, 0, len(allowedContentTypes))
+	for t := range allowedContentTypes {
+		types = append(types, t)
+	}
+	slices.Sort(types)
+	return types
+}
+
+// ImageVariantNames lists the generated image variants.
+func ImageVariantNames() []string {
+	names := make([]string, 0, len(imageVariants))
+	for _, v := range imageVariants {
+		names = append(names, v.Name)
+	}
+	return names
 }
 
 func sanitizeFilename(name string) string {

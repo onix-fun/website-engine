@@ -19,6 +19,7 @@ import (
 	hmedia "websiteengine/presentation/http/handlers/media"
 	hoverview "websiteengine/presentation/http/handlers/overview"
 	hreleases "websiteengine/presentation/http/handlers/releases"
+	hsettings "websiteengine/presentation/http/handlers/settings"
 	"websiteengine/presentation/http/middleware"
 )
 
@@ -35,6 +36,7 @@ type Dependencies struct {
 	Media             *hmedia.Handler
 	Overview          *hoverview.Handler
 	Releases          *hreleases.Handler
+	Settings          *hsettings.Handler
 	Site              *site.Manager
 	DevPublicBaseURL  string
 	ProdPublicBaseURL string
@@ -93,6 +95,11 @@ func NewRouter(d Deps) http.Handler {
 	mux.Handle("POST /api/v1/admin/tokens", jsonStaff(d.Auth.CreateToken))
 	mux.Handle("GET /api/v1/admin/tokens/{id}", staff(d.Auth.GetToken))
 	mux.Handle("DELETE /api/v1/admin/tokens/{id}", staff(d.Auth.RevokeToken))
+
+	// Sanitized runtime configuration for the admin settings section.
+	if d.Settings != nil {
+		mux.Handle("GET /api/v1/admin/settings", staff(http.HandlerFunc(d.Settings.Get)))
+	}
 
 	// Operational summary for the admin dashboard.
 	mux.Handle("GET /api/v1/admin/overview", user(d.Overview.Get))

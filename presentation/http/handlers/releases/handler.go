@@ -5,7 +5,6 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
-	"strconv"
 	"strings"
 	"websiteengine/features/auth"
 	"websiteengine/features/releases"
@@ -198,7 +197,6 @@ func nullable(s string) any {
 }
 
 var _ = json.RawMessage{}
-var _ = strconv.Itoa
 var _ = errors.New
 
 func (h *Handler) SyncSource(w http.ResponseWriter, r *http.Request) {
@@ -282,4 +280,4 @@ func (h *Handler) ListReleasesForSource(w http.ResponseWriter, r *http.Request) 
 	response.JSON(w, http.StatusOK, map[string]any{"items": rels})
 }
 
-func (h *Handler) provider() *releases.Provider { return h.provider() }
+func (h *Handler) provider() *releases.Provider { return releases.NewProvider() }

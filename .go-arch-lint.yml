@@ -40,6 +40,7 @@ components:
   feat_overview: { in: features/overview }
   feat_releases: { in: features/releases }
   feat_provider: { in: features/releases/provider }
+  feat_settings: { in: features/settings }
 
   handlers:      { in: presentation/http/handlers/** }
   middleware:    { in: presentation/http/middleware/** }
@@ -87,15 +88,18 @@ deps:
   # *s3.Store edge from the composition root in cmd/api (false positive).
   feat_media:    { mayDependOn: [pkg_postgres, pkg_storage, pkg_principal], anyVendorDeps: true, deepScan: false }
   feat_overview: { mayDependOn: [pkg_postgres], anyVendorDeps: true }
+  # feat_settings is a pure runtime-configuration view; it imports no project
+  # code. The entry stays only to keep the linter's deps schema happy.
+  feat_settings: { mayDependOn: [pkg_response], anyVendorDeps: false }
   feat_releases: { mayDependOn: [pkg_postgres, pkg_storage, pkg_secrets, pkg_artifact, feat_provider, pkg_principal], anyVendorDeps: true, deepScan: false }
   feat_provider: { mayDependOn: [pkg_artifact], anyVendorDeps: true }
 
-  handlers:   { mayDependOn: [pkg_response, pkg_principal, feat_auth, feat_features, feat_content, feat_forms, feat_media, feat_overview, feat_releases], anyVendorDeps: true }
+  handlers:   { mayDependOn: [pkg_response, pkg_principal, feat_auth, feat_features, feat_content, feat_forms, feat_media, feat_overview, feat_releases, feat_settings], anyVendorDeps: true }
   middleware: { mayDependOn: [pkg_response, pkg_principal, feat_auth], anyVendorDeps: true }
   routes:     { mayDependOn: [pkg_site, pkg_static, pkg_response, handlers, middleware, feat_auth, feat_features, feat_content, feat_forms, feat_media, feat_overview, feat_releases], anyVendorDeps: true }
   presentation: { anyVendorDeps: true }
 
-  cmd_api:   { mayDependOn: [pkg_config, pkg_postgres, pkg_site, pkg_storage, pkg_secrets, pkg_static, pkg_environment, pkg_publication, pkg_artifact, pkg_validate, pkg_models, pkg_s3, migrations, feat_auth, feat_features, feat_content, feat_forms, feat_media, feat_overview, feat_releases, routes, handlers], anyVendorDeps: true }
+  cmd_api:   { mayDependOn: [pkg_config, pkg_postgres, pkg_site, pkg_storage, pkg_secrets, pkg_static, pkg_environment, pkg_publication, pkg_artifact, pkg_validate, pkg_models, pkg_s3, migrations, feat_auth, feat_features, feat_content, feat_forms, feat_media, feat_overview, feat_releases, feat_settings, routes, handlers], anyVendorDeps: true }
   cmd_atlas: { mayDependOn: [pkg_models], anyVendorDeps: true }
   cmd_integ: { mayDependOn: [pkg_config, pkg_postgres, pkg_site, pkg_storage, pkg_models, migrations, feat_auth, feat_features, feat_content, feat_forms, feat_media, feat_overview, feat_releases, routes, handlers], anyVendorDeps: true }
 

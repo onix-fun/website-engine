@@ -18,6 +18,7 @@ import (
 	"websiteengine/features/media"
 	"websiteengine/features/overview"
 	"websiteengine/features/releases"
+	"websiteengine/features/settings"
 	"websiteengine/migrations"
 	"websiteengine/pkg/config"
 	"websiteengine/pkg/environment"
@@ -33,6 +34,7 @@ import (
 	hmedia "websiteengine/presentation/http/handlers/media"
 	hoverview "websiteengine/presentation/http/handlers/overview"
 	hreleases "websiteengine/presentation/http/handlers/releases"
+	hsettings "websiteengine/presentation/http/handlers/settings"
 )
 
 // run starts the API server. The page-size constants mirror the limits that
@@ -135,6 +137,20 @@ func run(log *slog.Logger) error {
 
 	authHandler := hauth.NewHandler(authService, log, cfg.MaxJSONBytes)
 
+	settingsService := settings.NewService(settings.Config{
+		MaxJSONBytes:            cfg.MaxJSONBytes,
+		MaxUploadBytes:          cfg.MaxUploadBytes,
+		FormRateLimit:           cfg.FormRateLimit,
+		FormRateWindowSeconds:   int(cfg.FormRateWindow / time.Second),
+		PublicCORSOrigins:       cfg.PublicCORSOrigins,
+		AdminPageSize:           adminPageSize,
+		PublicPageSize:          publicPageSize,
+		SubmissionExportMaxRows: submissionExportMaxRows,
+		AcceptedContentTypes:    media.AcceptedContentTypes(),
+		ImageVariants:           media.ImageVariantNames(),
+	})
+	settingsHandler := hsettings.NewHandler(settingsService)
+
 	health := func(checkCtx context.Context) error {
 		if err := pool.Ping(checkCtx); err != nil {
 			return fmt.Errorf("postgres: %w", err)
@@ -163,7 +179,7 @@ func run(log *slog.Logger) error {
 		Log: log, AuthService: authService, Auth: authHandler,
 		Features: featureHandler, Content: contentHandler, Forms: formsHandler, Media: mediaHandler,
 		Overview: overviewHandler, Health: health, MaxJSONBytes: cfg.MaxJSONBytes,
-		Releases: releaseHandler, Site: siteManager,
+		Releases: releaseHandler, Site: siteManager, Settings: settingsHandler,
 		FormRateLimit: cfg.FormRateLimit, FormRateWindow: cfg.FormRateWindow,
 		TrustProxy: cfg.TrustProxyHeaders, PublicCORSOrigins: cfg.PublicCORSOrigins, PublicCORSByEnv: cfg.PublicCORSByEnv,
 	}
