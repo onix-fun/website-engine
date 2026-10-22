@@ -65,17 +65,30 @@ services:
       # 32-byte AES key (base64). Replace in production.
       RELEASE_MASTER_KEY: ${RELEASE_MASTER_KEY:-MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=}
       MAX_RELEASE_BYTES: "268435456"
+      # TLS/ACME: enable by setting TLS_ENABLED=true in the .env file and
+      # adding ports "443:443" and "80:80" to the server service.
+      TLS_ENABLED: ${TLS_ENABLED:-false}
+      HTTPS_ADDR: ${HTTPS_ADDR:-:443}
+      TLS_HTTP_ADDR: ${TLS_HTTP_ADDR:-:80}
+      ACME_EMAIL: ${ACME_EMAIL:-}
+      ACME_STAGING: ${ACME_STAGING:-false}
+      TLS_CACHE_DIR: "/data/tls"
       LOG_LEVEL: "info"
       TZ: "UTC"
     volumes:
       - release-cache:/data/releases
+      - tls-cache:/data/tls
     ports:
       - "8080:8080"
       - "8081:8081"
       - "8082:8082"
+      # Required when TLS_ENABLED=true (see .env.example).
+      # - "443:443"
+      # - "80:80"
     restart: unless-stopped
 
 volumes:
   postgres-data:
   minio-data:
   release-cache:
+  tls-cache:

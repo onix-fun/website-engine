@@ -34,8 +34,10 @@ Authorization: Bearer ct_live_...
 административных списков, 50 для публичных коллекций. Формы: 200 для списка заявок,
 10 000 строк для CSV.
 
-Публичные маршруты чтения и отправки форм поддерживают CORS, если задан
-`PUBLIC_CORS_ORIGINS`. Административные маршруты CORS не отдают.
+Публичные маршруты чтения и отправки форм поддерживают CORS. Пока в настройках
+среды не задан список origins, работают bootstrap-origins из конфигурации
+(`PUBLIC_CORS_ORIGINS[_DEV|_PROD]`, `*` разрешает все); после заполнения списка
+в админке действует только он. Административные маршруты CORS не отдают.
 
 ## Служебные маршруты
 
@@ -293,7 +295,7 @@ JSON.
 
 | Метод | Маршрут | Доступ |
 | --- | --- | --- |
-| GET | `/admin/forms/{key}/submissions` | staff |
+| GET | `/admin/forms/{key}/submissions?environment=dev\|prod` | staff | заявки формы; фильтр по среде и статусу |
 | GET | `/admin/forms/{key}/submissions/export` | staff |
 | GET | `/admin/submissions/{id}` | staff |
 | PATCH | `/admin/submissions/{id}/status` | staff |
@@ -315,6 +317,71 @@ JSON.
 
 CSV-экспорт учитывает те же фильтры, значения с потенциальными формулами Excel
 экранируются. Максимум 10 000 строк за экспорт.
+
+## Сайт: релизы и среды
+
+Неизменяемые zip-артефакты сайта выкатываются в две среды (`dev`, `prod`);
+подробности эксплуатации — в `docs/RELEASES.md`.
+
+### Релизы
+
+| Метод | Маршрут | Доступ | Описание |
+| --- | --- | --- | --- |
+| GET | `/admin/releases?limit=&cursor=` | user | список релизов (новые первыми) |
+| POST | `/admin/releases` | staff | импорт zip-артефакта (multipart: `artifact`, `version`, `tag`) |
+| POST | `/admin/releases/{id}/activate` | user+caps | активация релиза в среде; dev — админ/модератор, prod — админ |
+| POST | `/admin/releases/{id}/rollback` | user+caps | откат среды на предыдущий релиз; те же права |
+| GET | `/admin/publication-events?limit=&entity_kind=&environment=&feature_id=&cursor=` | staff | журнал публикаций контента и релизов |
+
+Импорт принимает корректный zip c `index.html` в корне; 400 возвращается для
+архивов без `index.html`, с `..`-путями, symlink-ами и превышением
+`MAX_RELEASE_BYTES`.
+
+При активации создаётся событие с метаданными:
+
+```json
+{"release_version": "1.2.3", "feature_versions": {"features": [{"key": "pages", "type": "collection", "dev_version": 2, "prod_version": 1}]}}
+```
+
+### Среды
+
+| Метод | Маршрут | Доступ | Описание |
+| --- | --- | --- | --- |
+| GET | `/admin/site/environments` | user | состояние обеих сред |
+| PATCH | `/admin/site/environments/{dev\|prod}` | admin | частичное обновление настроек |
+
+PATCH — optimistic concurrency: в теле передаётся актуальная `revision`;
+иначе 409 с `current_revision` тела конфликта. Обновляются только переданные
+поля:
+
+```json
+{
+  "revision": 4,
+  "name": "Продакшен",
+  "public_base_url": "https://example.com",
+  "domains": ["example.com", "www.example.com"],
+  "cors_origins": ["https://app.example"],
+  "tls_enabled": false
+}
+```
+
+Ошибки полей приходят кодом 400 (`validation_failed`); при конфликтующих
+доменах между средами — 400 с пояснением. Изменения CORS применяются без
+перезапуска.
+
+### Источники релизов
+
+| Метод | Маршрут | Доступ | Описание |
+| --- | --- | --- | --- |
+| GET | `/admin/release-sources` | staff | список источников |
+| POST | `/admin/release-sources` | staff+caps | создать источник (`provider`, `repo_url`, `asset_pattern`, `token`, `enabled`) |
+| DELETE | `/admin/release-sources/{id}` | staff | удалить источник |
+| GET | `/admin/release-sources/{id}/releases` | staff | релизы провайдера (теги + активы) |
+| POST | `/admin/release-sources/{id}/sync` | staff+caps | импорт актива (`asset_url`, `version?`, `tag?`) |
+
+`token` шифруется (AES-GCM, ключ `RELEASE_MASTER_KEY`) и никогда не
+возвращается в ответах. `sync` скачивает указанный актив провайдером,
+валидирует его как zip-релиз и записывает релиз с `source_id`.
 
 ## Настройки
 
@@ -407,6 +474,7 @@ CSV-экспорт учитывает те же фильтры, значения
 | 409 | `conflict` | revision, уникальность, состояние |
 | 413 | `request_too_large`, `file_too_large` | лимит размера |
 | 415 | `unsupported_media_type` | тип файла |
+| 421 | `misdirected_request` | HTTPS-запрос по хосту, не входящему в домены сред |
 | 422 | `schema_validation_failed`, `media_processing_failed` | данные не соответствуют схеме |
 | 429 | `rate_limited` | лимит публичных отправок |
 | 500 | `internal_error` | необработанная ошибка |

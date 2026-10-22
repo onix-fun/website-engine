@@ -46,6 +46,11 @@ docker compose up --build
   поиском по разрешённым полям, CSV-экспортом и rate limit.
 - Медиа в S3: загрузка, варианты изображений, публичный `302`-редирект, безопасное
   построение URL, повторная обработка и мягкое удаление.
+- Сайт-двигатель: неизменяемые zip-релизы с sha256-манифестом, две изолированные
+  среды (dev/prod), активация/откат, аудит-события со снимком версий схем,
+  импорт артефактов из GitHub/GitLab/Gitea с зашифрованным токеном.
+- Настройки сред в админке: публичный base URL, TLS/SNI-домены (настройка
+  сертификатов Let's Encrypt через ACME), CORS-origins, применяются без перезапуска.
 - Встроенная React/TypeScript-админка (без отдельного сервера).
 - Структурированные JSON-логи, request_id, единый формат ошибок, security headers.
 
@@ -138,6 +143,19 @@ docs/API.md                контракт API
 | `S3_PUBLIC_BASE_URL` | `http://localhost:9000` | публичный базовый URL хранилища |
 | `S3_FORCE_PATH_STYLE` | `true` | path-style для MinIO/совместимых S3 |
 | `S3_ENSURE_BUCKET` | `false` | создать bucket и public-read policy при старте (в compose — `true`) |
+| `DEV_PUBLIC_BASE_URL` | — | публичный base URL среды dev (ENV-фолбэк, БД приоритетнее) |
+| `PROD_PUBLIC_BASE_URL` | — | публичный base URL среды prod (ENV-фолбэк, БД приоритетнее) |
+| `PUBLIC_CORS_ORIGINS_DEV` | — | bootstrap CORS-origins среды dev (БД приоритетнее) |
+| `PUBLIC_CORS_ORIGINS_PROD` | — | bootstrap CORS-origins среды prod (БД приоритетнее) |
+| `RELEASE_MASTER_KEY` | — | 32-байтный base64-ключ шифрования токенов источников релизов |
+| `MAX_RELEASE_BYTES` | `268435456` | максимальный размер zip-артефакта (1 МиБ–2 ГиБ, по умолчанию 256 МиБ) |
+| `RELEASE_CACHE_DIR` | `./data/releases` | кеш распакованных релизов |
+| `TLS_ENABLED` | `false` | HTTPS-листенер с ACME/SNI-роутингом по доменам сред (см. `docs/RELEASES.md`) |
+| `HTTPS_ADDR` | `:443` | адрес TLS-листенера |
+| `TLS_HTTP_ADDR` | `:80` | адрес challenge-листенера (ACME + redirect) |
+| `ACME_EMAIL` | — | аккаунт Let's Encrypt |
+| `ACME_STAGING` | `false` | staging-CA Let's Encrypt для тестов |
+| `TLS_CACHE_DIR` | `./data/tls` | каталог хранения сертификатов |
 | `TZ` | — | API принудительно отдаёт время в UTC |
 
 ## Локальная разработка
@@ -178,7 +196,21 @@ go run ./cmd/api
 ```bash
 go test ./...
 go vet ./...
+go-arch-lint check
 ```
+
+Интеграционные тесты требуют PostgreSQL:
+
+```bash
+docker compose up -d db
+TEST_DATABASE_URL="postgres://engine:engine@localhost:5432/engine?sslmode=disable" \
+  go test ./cmd/integration/ -count=1
+```
+
+Юнит-покрытие включает: артефакты (path traversal, symlink, zip-bomb), ACL
+и маршрутизацию TLS-сервера, права ролей, изоляцию сред, CORS по средам,
+инварианты публикаций и матрицу прав. Конвейер релизов и его эксплуатация
+описаны в `docs/RELEASES.md`.
 
 Интеграционные тесты требуют отдельную disposable PostgreSQL-базу:
 

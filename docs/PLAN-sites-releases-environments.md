@@ -233,10 +233,10 @@ draft ──publish──> dev ──promote──> prod
 - [ ] Продвинуть артефакт в prod
 - [ ] Проверить изоляцию контента и форм
 - [ ] Rollback на предыдущий релиз
-- [ ] Обновить `README.md`
-- [ ] Обновить `docs/API.md`
-- [ ] Добавить `docs/RELEASES.md`
-- [ ] Обновить `.env.example` / compose-документацию
+- [x] Обновить `README.md`
+- [x] Обновить `docs/API.md`
+- [x] Добавить `docs/RELEASES.md`
+- [x] Обновить `.env.example` / compose-документацию
 - [ ] Полный прогон Go-проверок
 
 ---
