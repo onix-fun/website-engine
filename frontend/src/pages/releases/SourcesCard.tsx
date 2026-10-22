@@ -181,7 +181,7 @@ function CreateSourceDialog({
         repo_url: repoUrl.trim(),
         asset_pattern: assetPattern.trim(),
         token: token.trim() || undefined,
-        enabled: true,
+        is_enabled: true,
       }),
     onSuccess: onCreated,
     onError: (error) => toast.error(errorMessage(error), { duration: 6000 }),

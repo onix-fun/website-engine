@@ -366,7 +366,7 @@ export interface NewReleaseSourceInput {
   repo_url: string;
   asset_pattern: string;
   token?: string;
-  enabled?: boolean;
+  is_enabled?: boolean;
 }
 
 export interface SiteEnvironment {
