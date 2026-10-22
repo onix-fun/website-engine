@@ -146,6 +146,37 @@ function enumLabels(field: SchemaFieldNode): JsonObject | undefined {
   return Object.keys(labels).length > 0 ? labels : undefined;
 }
 
+function orderedKeys(fields: SchemaFieldNode[], limit = 500): JsonValue[] {
+  const keys: JsonValue[] = [];
+  for (const child of fields) {
+    const key = child.key.trim();
+    if (key) keys.push(key);
+  }
+  return keys.slice(0, limit);
+}
+
+function sortEntriesByOrder<T>(
+  entries: [string, T][],
+  order: JsonValue | undefined,
+): [string, T][] {
+  if (!Array.isArray(order)) return entries;
+  const rank = new Map<string, number>();
+  order.forEach((value, index) => {
+    if (typeof value === "string") rank.set(value, index);
+  });
+  if (rank.size === 0) return entries;
+  // Judged keys come first in the persisted order; keys not listed keep their
+  // schema order after them.
+  return [...entries]
+    .map(([key, value], index) => ({
+      key,
+      value,
+      rank: rank.get(key) ?? order.length + index,
+    }))
+    .sort((a, b) => a.rank - b.rank)
+    .map(({ key, value }) => [key, value] as [string, T]);
+}
+
 function buildObjectSchema(field: SchemaFieldNode): JsonObject {
   const properties: JsonObject = {};
   const required: JsonValue[] = [];
@@ -160,6 +191,10 @@ function buildObjectSchema(field: SchemaFieldNode): JsonObject {
     properties,
     additionalProperties: false,
   };
+  // jsonb canonicalizes object key order server-side, so the visual field
+  // order is persisted explicitly and restored when parsing.
+  const order = orderedKeys(field.children);
+  if (order.length > 0) schema["x-order"] = order.slice(0, 20);
   if (required.length > 0) schema.required = required;
   return schema;
 }
@@ -192,10 +227,12 @@ function buildArrayItemSchema(field: SchemaFieldNode): JsonObject {
         properties[key] = fieldToSchema(child);
         if (child.required) required.push(key);
       }
+      const order = orderedKeys(field.children);
       return {
         type: "object",
         properties,
         additionalProperties: false,
+        ...(order.length > 0 ? { "x-order": order } : {}),
         ...(required.length > 0 ? { required } : {}),
       };
     }
@@ -300,6 +337,8 @@ export function schemaFromFields(fields: SchemaFieldNode[], title: string): Json
     properties,
     additionalProperties: false,
   };
+  const order = orderedKeys(fields);
+  if (order.length > 0) schema["x-order"] = order;
   if (required.length > 0) schema.required = required;
   return schema;
 }
@@ -424,11 +463,13 @@ function parseField(
         ? raw.required.filter((value): value is string => typeof value === "string")
         : [],
     );
-    const children = Object.entries(properties)
-      .filter((entry): entry is [string, JsonObject] => isRecord(entry[1]))
-      .map(([childKey, childRaw]) =>
+    const entries = Object.entries(properties).filter(
+      (entry): entry is [string, JsonObject] => isRecord(entry[1]),
+    );
+    const children = sortEntriesByOrder(entries, raw["x-order"]).map(
+      ([childKey, childRaw]) =>
         parseField(childKey, childRaw, requiredKeys.has(childKey), warnings),
-      );
+    );
     return createField("object", { ...base, children });
   }
   if (type === "array") {
@@ -444,11 +485,13 @@ function parseField(
           ? items.required.filter((value): value is string => typeof value === "string")
           : [],
       );
-      const children = Object.entries(properties)
-        .filter((entry): entry is [string, JsonObject] => isRecord(entry[1]))
-        .map(([childKey, childRaw]) =>
+      const itemEntries = Object.entries(properties).filter(
+        (entry): entry is [string, JsonObject] => isRecord(entry[1]),
+      );
+      const children = sortEntriesByOrder(itemEntries, items["x-order"]).map(
+        ([childKey, childRaw]) =>
           parseField(childKey, childRaw, requiredKeys.has(childKey), warnings),
-        );
+      );
       return createField("array", {
         ...base,
         itemType: "object",
@@ -508,11 +551,13 @@ export function parsedSchema(raw: JsonObject | null | undefined): ParsedSchema {
       ? raw.required.filter((value): value is string => typeof value === "string")
       : [],
   );
-  const fields = Object.entries(properties)
-    .filter((entry): entry is [string, JsonObject] => isRecord(entry[1]))
-    .map(([key, property]) =>
+  const entries = Object.entries(properties).filter(
+    (entry): entry is [string, JsonObject] => isRecord(entry[1]),
+  );
+  const fields = sortEntriesByOrder(entries, raw["x-order"]).map(
+    ([key, property]) =>
       parseField(key, property, requiredKeys.has(key), warnings),
-    );
+  );
   return { fields, warnings };
 }
 

@@ -6,7 +6,6 @@ import type {
   BlockType,
   BlockTypeOption,
   ContentBlock,
-  DocumentState,
   HeadingBlock,
 } from "./types";
 
@@ -202,8 +201,38 @@ export function starterValue(field: SchemaFieldNode): JsonValue {
   }
   switch (field.type) {
     case "number":
-    case "integer":
+    case "integer": {
+      // Respect schema bounds so a fresh entry doesn't start invalid.
+      if (typeof field.min === "number") return field.min;
+      if (typeof field.max === "number" && field.max < 0) return field.max;
       return 0;
+    }
+    case "array": {
+      // Prefill arrays up to minItems so autosave never sends data the
+      // published schema rejects (minItems would 422 an empty array).
+      const minCount = Math.max(0, field.minItems ?? 0);
+      const rows: JsonValue[] = [];
+      for (let i = 0; i < minCount; i += 1) {
+        if (field.itemType === "object") {
+          const row: JsonObject = {};
+          field.children.forEach((child) => {
+            if (child.key.trim()) row[child.key.trim()] = starterValue(child);
+          });
+          rows.push(row);
+          continue;
+        }
+        const pseudo: SchemaFieldNode = {
+          ...field,
+          id: `${field.id}-item`,
+          key: "item",
+          type: field.itemType as SchemaFieldNode["type"],
+          children: [],
+          required: false,
+        };
+        rows.push(pseudo.type === "object" ? {} : starterValue(pseudo));
+      }
+      return rows;
+    }
     case "boolean":
       return false;
     case "enum":
@@ -279,80 +308,6 @@ export function buildDocumentData(
     ...metadata,
     [blocksKey]: blocksToJson(blocks),
   };
-}
-
-export function validateMetadata(
-  fields: SchemaFieldNode[],
-  metadata: JsonObject,
-  blocksKey: string | null,
-): string[] {
-  const messages: string[] = [];
-  for (const field of fields) {
-    if (field.type === "blocks" || field.key === blocksKey) continue;
-    if (!field.key.trim()) continue;
-    const value = metadata[field.key];
-    const empty =
-      value === undefined ||
-      value === null ||
-      (typeof value === "string" && !value.trim()) ||
-      (Array.isArray(value) && value.length === 0);
-    if (field.required && empty) {
-      messages.push(`Заполните обязательное поле «${field.label || field.key}»`);
-    }
-  }
-  return messages;
-}
-
-export function validateBlocks(blocks: ContentBlock[]): string[] {
-  const messages: string[] = [];
-  blocks.forEach((block, index) => {
-    const position = index + 1;
-    switch (block.type) {
-      case "paragraph":
-        if (!block.data.text.trim()) messages.push(`Блок ${position}: пустой параграф`);
-        break;
-      case "heading":
-        if (!block.data.text.trim()) messages.push(`Блок ${position}: пустой заголовок`);
-        break;
-      case "bulletedList":
-      case "numberedList":
-        if (!block.data.items.some((item) => item.trim())) {
-          messages.push(`Блок ${position}: список без заполненных пунктов`);
-        }
-        break;
-      case "quote":
-        if (!block.data.text.trim()) messages.push(`Блок ${position}: пустая цитата`);
-        break;
-      case "code":
-        if (!block.data.code.trim()) messages.push(`Блок ${position}: пустой блок кода`);
-        break;
-      case "image":
-        if (!block.data.mediaId) messages.push(`Блок ${position}: не выбрано изображение`);
-        break;
-      case "gallery":
-        if (block.data.mediaIds.length === 0) {
-          messages.push(`Блок ${position}: галерея без изображений`);
-        }
-        break;
-      case "video":
-        if (!block.data.mediaId) messages.push(`Блок ${position}: не выбрано видео`);
-        break;
-      case "divider":
-        break;
-    }
-  });
-  return messages;
-}
-
-export function validateDocument(
-  fields: SchemaFieldNode[],
-  state: DocumentState,
-  blocksKey: string | null,
-): string[] {
-  return [
-    ...validateMetadata(fields, state.metadata, blocksKey),
-    ...validateBlocks(state.blocks),
-  ];
 }
 
 export function blockPreviewText(block: ContentBlock): string {

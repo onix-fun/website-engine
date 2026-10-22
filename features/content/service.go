@@ -109,9 +109,8 @@ func (s *Service) Create(ctx context.Context, actor principal.Principal, feature
 	if err != nil {
 		return Detail{}, err
 	}
-	if err := s.validateDataVersion(ctx, tx, schemaVersion.Schema, data); err != nil {
-		return Detail{}, err
-	}
+	// Drafts are stored as-is: the schema is enforced when the entry is
+	// published, not while the editor autosaves incomplete data.
 
 	creator := actor.TokenID
 	entryID := uuid.New()
@@ -170,9 +169,8 @@ func (s *Service) SaveDraft(ctx context.Context, actor principal.Principal, entr
 	if err != nil {
 		return Detail{}, err
 	}
-	if err := s.validateDataVersion(ctx, tx, schemaVersion.Schema, data); err != nil {
-		return Detail{}, err
-	}
+	// Lenient draft save: see CreateEntry — schema conformance is enforced
+	// on publish/promote.
 
 	creator := actor.TokenID
 	if entry.DraftVersionID != nil {

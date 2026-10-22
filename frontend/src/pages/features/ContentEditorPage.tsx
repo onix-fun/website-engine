@@ -27,7 +27,6 @@ import type {
   EntryVersion,
   JsonObject,
   JsonValue,
-  Media,
 } from "@/types";
 import { queryKeys } from "@/lib/query-keys";
 import { errorMessage } from "@/lib/errors";
@@ -62,28 +61,26 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { BlockEditor } from "@/domains/content-editor/BlockEditor";
 import { ContentPreview } from "@/domains/content-editor/ContentPreview";
-import { MetadataEditor } from "@/domains/content-editor/MetadataEditor";
+import {
+  EntryFieldsForm,
+  validateEntryFields,
+} from "@/domains/content-editor/EntryForm";
 import {
   blocksKeyFromFields,
   buildDocumentData,
   deriveDocumentTitle,
   documentMetadata,
-  isBlocksField,
   parseBlocks,
   starterMetadata,
-  validateBlocks,
-  validateMetadata,
 } from "@/domains/content-editor/blocks";
-import type { ContentBlock, DocumentState } from "@/domains/content-editor/types";
+import type { DocumentState } from "@/domains/content-editor/types";
 import { useContentAutosave } from "@/domains/content-editor/useContentAutosave";
 import { useEditorHistory } from "@/domains/content-editor/useEditorHistory";
 import { parsedSchema } from "@/domains/schema-builder/schema";
 import type { SchemaFieldNode } from "@/domains/schema-builder/types";
 import { DiffList, DiffSummaryBadges } from "@/domains/versioning/DiffView";
 import { diffJson } from "@/domains/versioning/diff";
-import { MediaPickerDialog } from "@/domains/media/MediaPickerDialog";
 
 type PreviewWidth = "desktop" | "tablet" | "mobile";
 
@@ -187,14 +184,12 @@ export default function ContentEditorPage() {
   });
 
   const schema =
-    schemaQuery.data?.draft?.schema ?? schemaQuery.data?.prod?.schema ?? null;
+    schemaQuery.data?.draft?.schema ??
+    schemaQuery.data?.dev?.schema ??
+    schemaQuery.data?.prod?.schema ??
+    null;
   const fields = useMemo(() => parsedSchema(schema).fields, [schema]);
   const blocksKey = useMemo(() => blocksKeyFromFields(fields), [fields]);
-  const blocksField = useMemo(() => fields.find(isBlocksField), [fields]);
-  const allowedBlockTypes = useMemo(
-    () => blocksField?.allowedBlocks ?? [],
-    [blocksField],
-  );
 
   const {
     value: editorState,
@@ -209,9 +204,6 @@ export default function ContentEditorPage() {
   const [seeded, setSeeded] = useState(false);
   const [preview, setPreview] = useState(false);
   const [previewWidth, setPreviewWidth] = useState<PreviewWidth>("desktop");
-  const [mediaPickerField, setMediaPickerField] = useState<SchemaFieldNode | null>(
-    null,
-  );
   const [historyOpen, setHistoryOpen] = useState(false);
   const [selectedVersion, setSelectedVersion] = useState<EntryVersion | null>(
     null,
@@ -286,7 +278,11 @@ export default function ContentEditorPage() {
 
   const buildState = useCallback(
     (entry: EntryDetail | null | undefined): DocumentState =>
-      stateFromData(entry ? entry.draft?.data ?? entry.prod?.data ?? null : null),
+      stateFromData(
+        entry
+          ? entry.draft?.data ?? entry.dev?.data ?? entry.prod?.data ?? null
+          : null,
+      ),
     [stateFromData],
   );
 
@@ -334,25 +330,10 @@ export default function ContentEditorPage() {
     [applyUpdate],
   );
 
-  const updateBlocks = useCallback(
-    (next: ContentBlock[], coalesce = false) => {
-      applyUpdate((current) => ({ ...current, blocks: next }), coalesce);
-    },
-    [applyUpdate],
-  );
 
   const title = useMemo(
     () => deriveDocumentTitle(editorState.metadata, editorState.blocks),
     [editorState],
-  );
-
-  const blockingIssues = useMemo(
-    () => validateMetadata(fields, editorState.metadata, blocksKey),
-    [fields, editorState.metadata, blocksKey],
-  );
-  const advisoryIssues = useMemo(
-    () => validateBlocks(editorState.blocks),
-    [editorState.blocks],
   );
 
   const titleField = useMemo(() => {
@@ -365,9 +346,28 @@ export default function ContentEditorPage() {
     if (preferred) return preferred;
     return fields.find(
       (field) =>
-        field.type === "string" && field.key !== blocksKey && field.key.trim(),
+        (field.type === "string" || field.type === "text") &&
+        field.key !== blocksKey &&
+        field.key.trim(),
     );
   }, [fields, blocksKey]);
+  const blockingIssues = useMemo(
+    () => validateEntryFields(fields, editorState.metadata),
+    [fields, editorState.metadata],
+  );
+  const preservedBlocks = editorState.blocks;
+  const editableFields = useMemo(() => {
+    const titleKey = titleField?.key ?? null;
+    return fields.filter(
+      (field) =>
+        field.type !== "blocks" &&
+        field.key !== blocksKey &&
+        field.key !== titleKey &&
+        field.key.trim(),
+    );
+  }, [fields, blocksKey, titleField]);
+
+
 
   const publishMutation = useMutation({
     mutationFn: async () => {
@@ -425,7 +425,10 @@ export default function ContentEditorPage() {
   const handlePublish = async () => {
     if (blockingIssues.length > 0) {
       toast.error("Заполните обязательные поля перед публикацией", {
-        description: blockingIssues.slice(0, 3).join(". "),
+        description: blockingIssues
+            .slice(0, 3)
+            .map((issue) => `${issue.message} (${issue.path})`)
+            .join(". "),
       });
       return;
     }
@@ -702,10 +705,17 @@ export default function ContentEditorPage() {
               size="sm"
               onClick={() => void handlePublish()}
               loading={publishMutation.isPending}
-              disabled={archived}
+              disabled={archived || blockingIssues.length > 0}
+              title={
+                blockingIssues.length > 0
+                  ? "Исправьте ошибки формы, чтобы опубликовать"
+                  : undefined
+              }
             >
               <Send />
-              Опубликовать
+              {blockingIssues.length > 0
+                ? `Опубликовать (${blockingIssues.length})`
+                : "Опубликовать"}
             </Button>
             <Button
               size="sm"
@@ -874,45 +884,48 @@ export default function ContentEditorPage() {
           </div>
         </div>
       ) : (
-        <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_20rem]">
-          <div className="space-y-4">
-            <div className="rounded-lg border border-border bg-card p-3 sm:p-4">
-              <Label htmlFor="entry-title" className="text-xs text-muted-foreground">
-                Название записи
-              </Label>
-              {titleField ? (
-                <Input
-                  id="entry-title"
-                  className="mt-1.5 h-auto py-2 text-lg font-semibold"
-                  value={
-                    typeof editorState.metadata[titleField.key] === "string"
-                      ? (editorState.metadata[titleField.key] as string)
-                      : ""
-                  }
-                  placeholder={titleField.placeholder || "Без названия"}
-                  disabled={archived}
-                  onChange={(event) =>
-                    updateMetadata(titleField.key, event.target.value)
-                  }
-                />
-              ) : (
-                <p className="mt-1.5 text-sm text-muted-foreground">
-                  В схеме нет строкового поля для названия — заголовок выводится из
-                  первого блока с текстом.
+        <div className="space-y-4">
+          <div className="rounded-lg border border-border bg-card p-3 sm:p-4">
+            <Label htmlFor="entry-title" className="text-xs text-muted-foreground">
+              Название записи
+              {titleField?.required && <span className="ml-0.5 text-destructive">*</span>}
+            </Label>
+            {titleField &&
+              blockingIssues.some((issue) => issue.path === titleField.key) && (
+                <p className="mt-1.5 text-xs text-destructive">
+                  {blockingIssues.find((issue) => issue.path === titleField.key)
+                    ?.message}
                 </p>
               )}
-            </div>
+            {titleField ? (
+              <Input
+                id="entry-title"
+                className="mt-1.5 h-auto py-2 text-lg font-semibold"
+                value={
+                  typeof editorState.metadata[titleField.key] === "string"
+                    ? (editorState.metadata[titleField.key] as string)
+                    : ""
+                }
+                placeholder={titleField.placeholder || "Без названия"}
+                disabled={archived}
+                maxLength={titleField.maxLength}
+                onChange={(event) =>
+                  updateMetadata(titleField.key, event.target.value)
+                }
+              />
+            ) : (
+              <p className="mt-1.5 text-sm text-muted-foreground">
+                В схеме нет строкового поля для названия.
+              </p>
+            )}
+          </div>
 
+          {blocksKey && (
             <div className="rounded-lg border border-border bg-card p-3 sm:p-4">
-              <div className="mb-3 flex items-center justify-between gap-2">
-                <h2 className="text-sm font-semibold">Содержание</h2>
-                <span className="text-2xs text-muted-foreground">
-                  {editorState.blocks.length} блок(ов)
-                </span>
-              </div>
+              <h2 className="text-sm font-semibold">Блочные данные (legacy)</h2>
               {blockWarnings.length > 0 && (
-                <div className="mb-3">
-                  <InlineAlert tone="warning" title="Часть данных не загрузилась">
+                <div className="mt-2">
+                  <InlineAlert tone="warning" title="Часть блочных данных не загружена">
                     <ul className="list-disc pl-4">
                       {blockWarnings.map((warning) => (
                         <li key={warning}>{warning}</li>
@@ -921,79 +934,40 @@ export default function ContentEditorPage() {
                   </InlineAlert>
                 </div>
               )}
-              <BlockEditor
-                blocks={editorState.blocks}
-                onChange={updateBlocks}
-                allowedTypes={allowedBlockTypes}
-                disabled={archived}
-              />
+              <p className="mt-2 text-xs leading-5 text-muted-foreground">
+                Тип поля «Блоки» удалён из редактора. Сохранённые блочные данные
+                ({preservedBlocks.length} блок(ов)) не изменяются и не удаляются:
+                при сохранении черновика они переносятся как есть.
+              </p>
             </div>
-          </div>
+          )}
 
-          <aside className="space-y-4">
-            <div className="rounded-lg border border-border bg-card p-3 sm:p-4">
-              <h2 className="mb-3 text-sm font-semibold">Поля записи</h2>
-              <MetadataEditor
-                fields={fields}
-                metadata={editorState.metadata}
-                onChange={updateMetadata}
-                onPickMedia={(field) => setMediaPickerField(field)}
-                blocksKey={blocksKey}
-                disabled={archived}
-              />
+          {blockingIssues.length > 0 && (
+            <div className="rounded-lg border border-destructive/50 bg-destructive/5 p-3 sm:p-4">
+              <h2 className="text-sm font-semibold text-destructive">
+                Исправьте ошибки перед публикацией
+              </h2>
+              <ul className="mt-2 space-y-1 text-xs text-muted-foreground">
+                {blockingIssues.slice(0, 8).map((issue) => (
+                  <li key={issue.path + issue.message} className="flex gap-1.5">
+                    <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-destructive" />
+                    {issue.message}
+                    <code className="text-2xs">{issue.path}</code>
+                  </li>
+                ))}
+              </ul>
             </div>
+          )}
 
-            {blockingIssues.length > 0 && (
-              <div className="rounded-lg border border-border bg-card p-3 sm:p-4">
-                <h2 className="mb-2 text-sm font-semibold">
-                  Обязательные поля не заполнены
-                </h2>
-                <ul className="space-y-1 text-xs text-muted-foreground">
-                  {blockingIssues.map((issue) => (
-                    <li key={issue} className="flex gap-1.5">
-                      <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-destructive" />
-                      {issue}
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            )}
-
-            {advisoryIssues.length > 0 && (
-              <div className="rounded-lg border border-border bg-card p-3 sm:p-4">
-                <h2 className="mb-2 text-sm font-semibold">Замечания к блокам</h2>
-                <ul className="space-y-1 text-xs text-muted-foreground">
-                  {advisoryIssues.map((issue) => (
-                    <li key={issue} className="flex gap-1.5">
-                      <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-warning" />
-                      {issue}
-                    </li>
-                  ))}
-                </ul>
-                <p className="mt-2 text-2xs text-muted-foreground">
-                  Замечания не блокируют публикацию, но могут привести к
-                  некорректному отображению записи.
-                </p>
-              </div>
-            )}
-          </aside>
+          <EntryFieldsForm
+            fields={editableFields}
+            metadata={editorState.metadata}
+            onChange={updateMetadata}
+            disabled={archived}
+            issues={blockingIssues}
+          />
         </div>
       )}
-
-      <MediaPickerDialog
-        open={mediaPickerField !== null}
-        onClose={() => setMediaPickerField(null)}
-        onSelect={(selected: Media[]) => {
-          const field = mediaPickerField;
-          setMediaPickerField(null);
-          const first = selected[0];
-          if (!field || !first) return;
-          updateMetadata(field.key, first.id);
-        }}
-        mode="single"
-        accept="all"
-        title="Выбрать файл"
-      />
 
       <Dialog open={historyOpen} onOpenChange={setHistoryOpen}>
         <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-3xl">

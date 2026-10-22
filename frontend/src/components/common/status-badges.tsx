@@ -54,7 +54,10 @@ export function FeatureStatusBadge({ status }: { status: FeatureStatus }) {
 export function SchemaStateBadge({
   feature,
 }: {
-  feature: Pick<Feature, "prod_version_id" | "draft_version_id">;
+  feature: Pick<
+    Feature,
+    "prod_version_id" | "dev_version_id" | "draft_version_id"
+  >;
 }) {
   if (feature.prod_version_id && feature.draft_version_id) {
     return (
@@ -77,6 +80,15 @@ export function SchemaStateBadge({
       <Badge variant="warning">
         <CircleDashed aria-hidden="true" />
         Только черновик
+      </Badge>
+    );
+  }
+  if (feature.dev_version_id) {
+    // Published, but not yet promoted to prod.
+    return (
+      <Badge variant="success">
+        <CheckCircle2 aria-hidden="true" />
+        Схема в dev
       </Badge>
     );
   }

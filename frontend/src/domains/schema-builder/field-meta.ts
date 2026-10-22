@@ -1,7 +1,6 @@
 import {
   AlignLeft,
   Binary,
-  Blocks,
   Braces,
   Calendar,
   CalendarClock,
@@ -37,7 +36,6 @@ export const FIELD_TYPES: FieldTypeMeta[] = [
   { value: "object", label: "Объект", group: "Структуры", hint: "Вложенные поля", icon: Braces },
   { value: "array", label: "Массив", group: "Структуры", hint: "Повторяющиеся значения", icon: ListTree },
   { value: "media", label: "Медиа", group: "Медиа", hint: "ID файла медиатеки, format: media", icon: Image },
-  { value: "blocks", label: "Блоки", group: "Медиа", hint: "Блочный контент (widget blocks)", icon: Blocks },
 ];
 
 export const ARRAY_ITEM_TYPES: Array<{ value: ArrayItemType; label: string }> = [
