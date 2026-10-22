@@ -8,7 +8,7 @@ RUN pnpm install --frozen-lockfile
 COPY frontend/ ./
 RUN pnpm build
 
-FROM golang:1.24-alpine AS backend
+FROM golang:1.26-alpine AS backend
 WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
@@ -19,7 +19,9 @@ RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /out/server 
 FROM alpine:3.21
 RUN apk add --no-cache ca-certificates tzdata \
     && addgroup -S app \
-    && adduser -S -G app app
+    && adduser -S -G app app \
+    && mkdir -p /data/releases /data/tls \
+    && chown -R app:app /data
 COPY --from=backend /out/server /usr/local/bin/server
 USER app
 EXPOSE 8080

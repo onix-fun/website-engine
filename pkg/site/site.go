@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"log/slog"
 	"mime"
 	"net/http"
 	"os"
@@ -69,6 +70,7 @@ type Manager struct {
 
 	mu    sync.Mutex
 	cache map[environment.Environment]*cachedRelease
+	log   *slog.Logger
 }
 
 type cachedRelease struct {
@@ -76,8 +78,24 @@ type cachedRelease struct {
 	dir string
 }
 
+// NewManager builds a manager that does not log preparation failures.
 func NewManager(repo *Repository, store storage.ObjectStore, cacheDir string) *Manager {
-	return &Manager{repo: repo, store: store, cacheDir: cacheDir, cache: make(map[environment.Environment]*cachedRelease)}
+	return &Manager{repo: repo, store: store, cacheDir: cacheDir,
+		cache: make(map[environment.Environment]*cachedRelease)}
+}
+
+// NewManagerWithLogger accepts a logger so preparation failures are not
+// reduced to a generic 503 body. A nil logger disables logging.
+func NewManagerWithLogger(repo *Repository, store storage.ObjectStore, cacheDir string, log *slog.Logger) *Manager {
+	return &Manager{repo: repo, store: store, cacheDir: cacheDir,
+		cache: make(map[environment.Environment]*cachedRelease), log: log}
+}
+
+func (m *Manager) warn(msg string, err error, extra ...any) {
+	if m.log != nil {
+		args := append([]any{"err", err}, extra...)
+		m.log.Warn(msg, args...)
+	}
 }
 
 type Handler struct {
@@ -98,6 +116,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	release, dir, err := h.manager.ready(r.Context(), h.env)
 	if err != nil {
+		h.manager.warn("site release preparation failed", err, "environment", h.env.String())
 		http.Error(w, "site release is not ready", http.StatusServiceUnavailable)
 		return
 	}

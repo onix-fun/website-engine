@@ -221,23 +221,23 @@ draft ──publish──> dev ──promote──> prod
 - [x] Активация/rollback и снимок версий в событии
 - [x] Шифрование/расшифровка токенов провайдеров
 - [x] Fake Git-провайдер через `httptest`
-- [ ] Frontend `pnpm typecheck`
-- [ ] Frontend `pnpm build`
+- [x] Frontend `pnpm typecheck`
+- [x] Frontend `pnpm build`
 
 ### 8. E2E и документация
 
-- [ ] Собрать тестовый сайт `onix-fun/website`
-- [ ] Упаковать `frontend/dist` в zip
-- [ ] Загрузить артефакт вручную
-- [ ] Активировать dev и проверить статику + API
-- [ ] Продвинуть артефакт в prod
-- [ ] Проверить изоляцию контента и форм
-- [ ] Rollback на предыдущий релиз
+- [x] Собрать тестовый сайт `onix-fun/website`
+- [x] Упаковать `frontend/dist` в zip
+- [x] Загрузить артефакт вручную
+- [x] Активировать dev и проверить статику + API
+- [x] Продвинуть артефакт в prod
+- [x] Проверить изоляцию контента и форм
+- [x] Rollback на предыдущий релиз
 - [x] Обновить `README.md`
 - [x] Обновить `docs/API.md`
 - [x] Добавить `docs/RELEASES.md`
 - [x] Обновить `.env.example` / compose-документацию
-- [ ] Полный прогон Go-проверок
+- [x] Полный прогон Go-проверок
 
 ---
 

@@ -176,7 +176,7 @@ func run(log *slog.Logger) error {
 	}
 	releaseService := releases.NewService(releaseRepo, objectStore, box, cfg.MaxReleaseBytes)
 	releaseHandler := hreleases.NewHandler(releaseService, log, cfg.MaxReleaseBytes)
-	siteManager := site.NewManager(site.NewRepository(pool), objectStore, cfg.ReleaseCacheDir)
+	siteManager := site.NewManagerWithLogger(site.NewRepository(pool), objectStore, cfg.ReleaseCacheDir, log)
 
 	// The database is the source of truth for public base URLs; the
 	// environment variables only bootstrap empty values. Change requires a
