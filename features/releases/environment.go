@@ -65,7 +65,7 @@ var domainLimit = 32
 // an absolute URL.
 func (s *Service) UpdateEnvironment(ctx context.Context, env environment.Environment, in EnvironmentInput) (EnvironmentState, error) {
 	if !env.Valid() {
-		return EnvironmentState{}, errors.New("environment must be dev or prod")
+		return EnvironmentState{}, &ValidationError{Message: "environment must be dev or prod"}
 	}
 	name := ""
 	if in.Name != nil {

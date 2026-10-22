@@ -136,7 +136,7 @@ func (r *Router) resolve(env environment.Environment) (http.Handler, bool) {
 
 func (r *Router) environmentForHost(host string) environment.Environment {
 	r.mu.RLock()
-	env, ok := r.routes[host]
+	env, ok := r.routes[normalizeHost(host)]
 	r.mu.RUnlock()
 	if !ok {
 		return ""

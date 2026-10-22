@@ -16,7 +16,11 @@ type GitHub struct {
 }
 
 func NewGitHub() *GitHub {
-	return &GitHub{client: &http.Client{Timeout: 30 * time.Second}}
+	c := &http.Client{Timeout: 30 * time.Second}
+	if testHTTPClient() != nil {
+		c = testHTTPClient()
+	}
+	return &GitHub{client: c}
 }
 
 type ghRelease struct {
@@ -39,7 +43,11 @@ func (g *GitHub) ListReleases(ctx context.Context, repoURL string, limit int) ([
 	if limit <= 0 || limit > 50 {
 		limit = 20
 	}
-	endpoint := fmt.Sprintf("https://api.github.com/repos/%s/%s/releases?per_page=%d", owner, repo, limit)
+	base := "https://api.github.com"
+	if testAPIBase != "" {
+		base = testAPIBase
+	}
+	endpoint := fmt.Sprintf("%s/repos/%s/%s/releases?per_page=%d", base, owner, repo, limit)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
 	if err != nil {
 		return nil, err
@@ -76,10 +84,10 @@ func (g *GitHub) DownloadAsset(ctx context.Context, downloadURL string) (io.Read
 	if err != nil {
 		return nil, 0, err
 	}
-	if u.Scheme != "https" {
+	if !schemeOK(u.Scheme) {
 		return nil, 0, fmt.Errorf("invalid asset url")
 	}
-	if !isAllowedHost(u.Hostname()) {
+	if !allowedHost(u.Hostname()) {
 		return nil, 0, fmt.Errorf("asset host not allowed")
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, downloadURL, nil)
@@ -107,7 +115,7 @@ func parseRepo(repoURL string) (string, string, error) {
 	if u.Scheme != "https" {
 		return "", "", fmt.Errorf("repo_url must be https")
 	}
-	if !isAllowedHost(u.Hostname()) {
+	if !allowedHost(u.Hostname()) {
 		return "", "", fmt.Errorf("repo host not allowed")
 	}
 	parts := strings.Split(strings.Trim(u.Path, "/"), "/")

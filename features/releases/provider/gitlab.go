@@ -16,7 +16,11 @@ type GitLab struct {
 }
 
 func NewGitLab() *GitLab {
-	return &GitLab{client: &http.Client{Timeout: 30 * time.Second}}
+	c := &http.Client{Timeout: 30 * time.Second}
+	if testHTTPClient() != nil {
+		c = testHTTPClient()
+	}
+	return &GitLab{client: c}
 }
 
 type glRelease struct {
@@ -43,10 +47,10 @@ func (g *GitLab) ListReleases(ctx context.Context, repoURL string, limit int) ([
 	if err != nil {
 		return nil, err
 	}
-	if u.Scheme != "https" {
+	if !schemeOK(u.Scheme) {
 		return nil, fmt.Errorf("repo_url must be https")
 	}
-	if !isAllowedHost(u.Hostname()) {
+	if !allowedHost(u.Hostname()) {
 		return nil, fmt.Errorf("repo host not allowed")
 	}
 	parts := strings.Split(strings.Trim(u.Path, "/"), "/")
@@ -95,10 +99,10 @@ func (g *GitLab) DownloadAsset(ctx context.Context, downloadURL string) (io.Read
 	if err != nil {
 		return nil, 0, err
 	}
-	if u.Scheme != "https" {
+	if !schemeOK(u.Scheme) {
 		return nil, 0, fmt.Errorf("invalid asset url")
 	}
-	if !isAllowedHost(u.Hostname()) {
+	if !allowedHost(u.Hostname()) {
 		return nil, 0, fmt.Errorf("asset host not allowed")
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, downloadURL, nil)
