@@ -78,10 +78,13 @@ function RequireAuth() {
   return <Outlet />;
 }
 
-function RequireStaff() {
+function RequireStaff({ children }: { children?: React.ReactNode }) {
   const auth = useAuth();
   if (!auth.principal) return <LoadingPage />;
   if (auth.principal.role === "user") return <NoAccessScreen />;
+  // Rendering children instead of an Outlet keeps the parent route's outlet
+  // context intact (useOutletContext inside children must still see it).
+  if (children) return <>{children}</>;
   return <Outlet />;
 }
 
@@ -116,8 +119,12 @@ export const router = createBrowserRouter(
                 { path: "content/new", element: <ContentEditorPage /> },
                 { path: "content/:entryId", element: <ContentEditorPage /> },
                 {
-                  element: <RequireStaff />,
-                  children: [{ path: "settings", element: <FeatureSettingsPage /> }],
+                  path: "settings",
+                  element: (
+                    <RequireStaff>
+                      <FeatureSettingsPage />
+                    </RequireStaff>
+                  ),
                 },
               ],
             },

@@ -40,7 +40,15 @@ export interface FeatureOutletContext {
 }
 
 export function useFeatureContext() {
-  return useOutletContext<FeatureOutletContext>();
+  const ctx = useOutletContext<FeatureOutletContext | null>();
+  if (!ctx) {
+    // Route misconfiguration: this page is rendered outside the FeatureLayout
+    // outlet (e.g. wrapped in a route that creates its own <Outlet/>).
+    throw new Error(
+      "useFeatureContext: страница Feature отрендерена вне <Outlet context> FeatureLayout",
+    );
+  }
+  return ctx;
 }
 
 function FeatureTabs({
