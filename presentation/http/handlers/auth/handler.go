@@ -2,27 +2,30 @@ package auth
 
 import (
 	"errors"
+
 	"log/slog"
 	"net/http"
 	"time"
+	"websiteengine/features/auth"
+	"websiteengine/pkg/principal"
 
 	"github.com/google/uuid"
 
-	"websiteengine/presentation/http/response"
+	"websiteengine/pkg/response"
 )
 
 type Handler struct {
-	service *Service
+	service *auth.Service
 	log     *slog.Logger
 	maxJSON int64
 }
 
-func NewHandler(service *Service, log *slog.Logger, maxJSON int64) *Handler {
+func NewHandler(service *auth.Service, log *slog.Logger, maxJSON int64) *Handler {
 	return &Handler{service: service, log: log, maxJSON: maxJSON}
 }
 
 func (h *Handler) Me(w http.ResponseWriter, r *http.Request) {
-	p, ok := PrincipalFromContext(r.Context())
+	p, ok := principal.FromContext(r.Context())
 	if !ok {
 		response.Error(w, r, http.StatusUnauthorized, "unauthorized", "Требуется авторизация")
 		return
@@ -46,7 +49,7 @@ type createdTokenResponse struct {
 }
 
 func (h *Handler) CreateToken(w http.ResponseWriter, r *http.Request) {
-	p, _ := PrincipalFromContext(r.Context())
+	p, _ := principal.FromContext(r.Context())
 	var req createTokenRequest
 	if err := response.DecodeJSON(w, r, &req, h.maxJSON); err != nil {
 		response.WriteDecodeError(w, r, err)
@@ -61,14 +64,14 @@ func (h *Handler) CreateToken(w http.ResponseWriter, r *http.Request) {
 		ID:        created.Token.ID,
 		Name:      created.Token.Name,
 		Token:     created.Secret,
-		Role:      created.Token.Role,
+		Role:      string(created.Token.Role),
 		ExpiresAt: created.Token.ExpiresAt,
 		CreatedAt: created.Token.CreatedAt,
 	})
 }
 
 func (h *Handler) ListTokens(w http.ResponseWriter, r *http.Request) {
-	p, _ := PrincipalFromContext(r.Context())
+	p, _ := principal.FromContext(r.Context())
 	items, err := h.service.List(r.Context(), p)
 	if err != nil {
 		h.writeError(w, r, err)
@@ -78,7 +81,7 @@ func (h *Handler) ListTokens(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) GetToken(w http.ResponseWriter, r *http.Request) {
-	p, _ := PrincipalFromContext(r.Context())
+	p, _ := principal.FromContext(r.Context())
 	id, err := uuid.Parse(r.PathValue("id"))
 	if err != nil {
 		response.Error(w, r, http.StatusNotFound, "not_found", "Токен не найден")
@@ -93,7 +96,7 @@ func (h *Handler) GetToken(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) RevokeToken(w http.ResponseWriter, r *http.Request) {
-	p, _ := PrincipalFromContext(r.Context())
+	p, _ := principal.FromContext(r.Context())
 	id, err := uuid.Parse(r.PathValue("id"))
 	if err != nil {
 		response.Error(w, r, http.StatusNotFound, "not_found", "Токен не найден")
@@ -108,11 +111,11 @@ func (h *Handler) RevokeToken(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) writeError(w http.ResponseWriter, r *http.Request, err error) {
 	switch {
-	case errors.Is(err, ErrForbidden):
+	case errors.Is(err, auth.ErrForbidden):
 		response.Error(w, r, http.StatusForbidden, "forbidden", "Недостаточно прав")
-	case errors.Is(err, ErrValidation):
+	case errors.Is(err, auth.ErrValidation):
 		response.Error(w, r, http.StatusBadRequest, "validation_failed", "Некорректные параметры токена")
-	case errors.Is(err, ErrNotFound):
+	case errors.Is(err, auth.ErrNotFound):
 		response.Error(w, r, http.StatusNotFound, "not_found", "Токен не найден")
 	default:
 		h.log.Error("token operation failed", "request_id", response.RequestID(r.Context()), "error", err)

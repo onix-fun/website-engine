@@ -14,8 +14,8 @@ import (
 
 	"websiteengine/features/features"
 	"websiteengine/pkg/environment"
-	"websiteengine/internal/platform/validate"
-	"websiteengine/presentation/http/response"
+	"websiteengine/pkg/platform/validate"
+	"websiteengine/pkg/response"
 )
 
 type ValidationError struct {

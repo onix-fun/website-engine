@@ -13,8 +13,8 @@ WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
-COPY --from=web /src/internal/transport/static/dist ./internal/transport/static/dist
-RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /out/server ./cmd/server
+COPY --from=web /src/pkg/static/dist ./pkg/static/dist
+RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /out/server ./cmd/api
 
 FROM alpine:3.21
 RUN apk add --no-cache ca-certificates tzdata \

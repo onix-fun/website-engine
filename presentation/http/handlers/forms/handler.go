@@ -12,22 +12,22 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"websiteengine/features/forms"
+	"websiteengine/pkg/principal"
 
 	"github.com/google/uuid"
 
-	"websiteengine/features/auth"
-	"websiteengine/features/features"
 	"websiteengine/pkg/environment"
-	"websiteengine/presentation/http/response"
+	"websiteengine/pkg/response"
 )
 
 type Handler struct {
-	service *Service
+	service *forms.Service
 	log     *slog.Logger
 	maxJSON int64
 }
 
-func NewHandler(service *Service, log *slog.Logger, maxJSON int64) *Handler {
+func NewHandler(service *forms.Service, log *slog.Logger, maxJSON int64) *Handler {
 	return &Handler{service: service, log: log, maxJSON: maxJSON}
 }
 
@@ -141,7 +141,7 @@ func (h *Handler) UpdateStatus(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	actor, _ := auth.PrincipalFromContext(r.Context())
+	actor, _ := principal.FromContext(r.Context())
 	var req statusRequest
 	if err := response.DecodeJSON(w, r, &req, h.maxJSON); err != nil {
 		response.WriteDecodeError(w, r, err)
@@ -180,13 +180,13 @@ func (h *Handler) Delete(w http.ResponseWriter, r *http.Request) {
 	response.NoContent(w)
 }
 
-func parseFilter(w http.ResponseWriter, r *http.Request, withCursor bool) (ListFilter, error) {
+func parseFilter(w http.ResponseWriter, r *http.Request, withCursor bool) (forms.ListFilter, error) {
 	q := r.URL.Query()
 	limit, err := response.ParseLimit(q.Get("limit"), 50, 200)
 	if err != nil {
-		return ListFilter{}, err
+		return forms.ListFilter{}, err
 	}
-	filter := ListFilter{
+	filter := forms.ListFilter{
 		Status:          strings.TrimSpace(q.Get("status")),
 		Search:          strings.TrimSpace(q.Get("q")),
 		SearchField:     strings.TrimSpace(q.Get("field")),
@@ -197,7 +197,7 @@ func parseFilter(w http.ResponseWriter, r *http.Request, withCursor bool) (ListF
 	if raw := q.Get("environment"); raw != "" {
 		env, err := environment.Parse(raw)
 		if err != nil {
-			return ListFilter{}, err
+			return forms.ListFilter{}, err
 		}
 		filter.Environment = env
 	}
@@ -205,26 +205,26 @@ func parseFilter(w http.ResponseWriter, r *http.Request, withCursor bool) (ListF
 		filter.Sort = "desc"
 	}
 	if filter.Sort != "asc" && filter.Sort != "desc" {
-		return ListFilter{}, errors.New("sort должен быть asc или desc")
+		return forms.ListFilter{}, errors.New("sort должен быть asc или desc")
 	}
 	if raw := q.Get("created_from"); raw != "" {
 		t, err := time.Parse(time.RFC3339, raw)
 		if err != nil {
-			return ListFilter{}, errors.New("created_from должен быть RFC 3339")
+			return forms.ListFilter{}, errors.New("created_from должен быть RFC 3339")
 		}
 		filter.CreatedFrom = &t
 	}
 	if raw := q.Get("created_to"); raw != "" {
 		t, err := time.Parse(time.RFC3339, raw)
 		if err != nil {
-			return ListFilter{}, errors.New("created_to должен быть RFC 3339")
+			return forms.ListFilter{}, errors.New("created_to должен быть RFC 3339")
 		}
 		filter.CreatedTo = &t
 	}
 	if withCursor && q.Get("cursor") != "" {
 		cursor, ok := response.DecodeCursor(q.Get("cursor"))
 		if !ok {
-			return ListFilter{}, errors.New("Некорректный cursor")
+			return forms.ListFilter{}, errors.New("Некорректный cursor")
 		}
 		id, _ := uuid.Parse(cursor.ID)
 		filter.BeforeTime = &cursor.CreatedAt
@@ -283,8 +283,8 @@ func safeCSV(value string) string {
 }
 
 func (h *Handler) writeError(w http.ResponseWriter, r *http.Request, err error) {
-	var validationErr *ValidationError
-	var conflictErr *ConflictError
+	var validationErr *forms.ValidationError
+	var conflictErr *forms.ConflictError
 	switch {
 	case errors.As(err, &validationErr):
 		details := make([]response.ErrorDetail, 0, len(validationErr.Details))
@@ -298,11 +298,11 @@ func (h *Handler) writeError(w http.ResponseWriter, r *http.Request, err error) 
 		response.Error(w, r, http.StatusBadRequest, "validation_failed", validationErr.Message)
 	case errors.As(err, &conflictErr):
 		response.Error(w, r, http.StatusConflict, "conflict", conflictErr.Message)
-	case errors.Is(err, ErrNotFound):
+	case errors.Is(err, forms.ErrNotFound):
 		response.Error(w, r, http.StatusNotFound, "not_found", "Форма или заявка не найдены")
-	case errors.Is(err, features.ErrNotFound):
+	case errors.Is(err, forms.ErrNotFound):
 		response.Error(w, r, http.StatusNotFound, "not_found", "Форма не найдена")
-	case errors.Is(err, ErrConflict):
+	case errors.Is(err, forms.ErrConflict):
 		response.Error(w, r, http.StatusConflict, "conflict", "Конфликт состояния заявки")
 	default:
 		h.log.Error("form operation failed", "request_id", response.RequestID(r.Context()), "error", err)

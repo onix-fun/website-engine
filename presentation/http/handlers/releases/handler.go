@@ -7,21 +7,23 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"websiteengine/features/auth"
+	"websiteengine/features/releases"
+	"websiteengine/pkg/principal"
 
 	"github.com/google/uuid"
 
-	"websiteengine/features/auth"
 	"websiteengine/pkg/environment"
-	"websiteengine/presentation/http/response"
+	"websiteengine/pkg/response"
 )
 
 type Handler struct {
-	service  *Service
+	service  *releases.Service
 	log      *slog.Logger
 	maxBytes int64
 }
 
-func NewHandler(service *Service, log *slog.Logger, maxBytes int64) *Handler {
+func NewHandler(service *releases.Service, log *slog.Logger, maxBytes int64) *Handler {
 	return &Handler{service: service, log: log, maxBytes: maxBytes}
 }
 
@@ -32,7 +34,7 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 		response.Error(w, r, http.StatusBadRequest, "invalid_query", err.Error())
 		return
 	}
-	beforeTime, beforeID, err := ParseCursor(q.Get("cursor"))
+	beforeTime, beforeID, err := releases.ParseCursor(q.Get("cursor"))
 	if err != nil {
 		response.Error(w, r, http.StatusBadRequest, "invalid_query", err.Error())
 		return
@@ -46,7 +48,7 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) Import(w http.ResponseWriter, r *http.Request) {
-	actor, _ := auth.PrincipalFromContext(r.Context())
+	actor, _ := principal.FromContext(r.Context())
 	r.Body = http.MaxBytesReader(w, r.Body, h.maxBytes+1<<20)
 	if err := r.ParseMultipartForm(8 << 20); err != nil {
 		response.Error(w, r, http.StatusBadRequest, "invalid_multipart", "Не удалось прочитать архив")
@@ -62,7 +64,7 @@ func (h *Handler) Import(w http.ResponseWriter, r *http.Request) {
 		response.Error(w, r, http.StatusBadRequest, "invalid_artifact", "Артефакт должен быть zip-архивом")
 		return
 	}
-	rel, err := h.service.ImportManual(r.Context(), actor, ImportInput{
+	rel, err := h.service.ImportManual(r.Context(), actor, releases.ImportInput{
 		Version: r.FormValue("version"), Tag: r.FormValue("tag"), File: file, Size: header.Size,
 	})
 	if err != nil {
@@ -80,7 +82,7 @@ func (h *Handler) Activate(w http.ResponseWriter, r *http.Request) { h.mutate(w,
 func (h *Handler) Rollback(w http.ResponseWriter, r *http.Request) { h.mutate(w, r, true) }
 
 func (h *Handler) mutate(w http.ResponseWriter, r *http.Request, rollback bool) {
-	actor, _ := auth.PrincipalFromContext(r.Context())
+	actor, _ := principal.FromContext(r.Context())
 	id, err := uuid.Parse(r.PathValue("id"))
 	if err != nil {
 		response.Error(w, r, http.StatusNotFound, "not_found", "Релиз не найден")
@@ -97,15 +99,15 @@ func (h *Handler) mutate(w http.ResponseWriter, r *http.Request, rollback bool) 
 		return
 	}
 	if rollback {
-		if !auth.CanActivateRelease(actor.Role, env) {
+		if !auth.CanActivateRelease(string(actor.Role), env) {
 			response.Error(w, r, http.StatusForbidden, "forbidden", "Недостаточно прав для отката релиза")
 			return
 		}
-	} else if !auth.CanActivateRelease(actor.Role, env) {
+	} else if !auth.CanActivateRelease(string(actor.Role), env) {
 		response.Error(w, r, http.StatusForbidden, "forbidden", "Недостаточно прав для активации релиза")
 		return
 	}
-	var rel Release
+	var rel releases.Release
 	if rollback {
 		rel, err = h.service.Rollback(r.Context(), actor, env, id)
 	} else {
@@ -145,7 +147,7 @@ type sourceRequest struct {
 }
 
 func (h *Handler) CreateSource(w http.ResponseWriter, r *http.Request) {
-	actor, _ := auth.PrincipalFromContext(r.Context())
+	actor, _ := principal.FromContext(r.Context())
 	var req sourceRequest
 	if err := response.DecodeJSON(w, r, &req, 1<<20); err != nil {
 		response.WriteDecodeError(w, r, err)
@@ -155,7 +157,7 @@ func (h *Handler) CreateSource(w http.ResponseWriter, r *http.Request) {
 	if req.Enabled != nil {
 		enabled = *req.Enabled
 	}
-	src, err := h.service.CreateSource(r.Context(), actor, SourceInput{
+	src, err := h.service.CreateSource(r.Context(), actor, releases.SourceInput{
 		Provider: req.Provider, RepoURL: req.RepoURL, AssetPattern: req.AssetPattern,
 		Token: req.Token, Enabled: enabled,
 	})
@@ -181,7 +183,7 @@ func (h *Handler) DeleteSource(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) writeError(w http.ResponseWriter, r *http.Request, err error) {
 	switch {
-	case errors.Is(err, ErrNotFound):
+	case errors.Is(err, releases.ErrNotFound):
 		response.Error(w, r, http.StatusNotFound, "not_found", "Релиз не найден")
 	default:
 		response.Error(w, r, http.StatusBadRequest, "invalid_request", err.Error())
@@ -200,7 +202,7 @@ var _ = strconv.Itoa
 var _ = errors.New
 
 func (h *Handler) SyncSource(w http.ResponseWriter, r *http.Request) {
-	actor, _ := auth.PrincipalFromContext(r.Context())
+	actor, _ := principal.FromContext(r.Context())
 	id, err := uuid.Parse(r.PathValue("id"))
 	if err != nil {
 		response.Error(w, r, http.StatusNotFound, "not_found", "Источник не найден")
@@ -219,7 +221,7 @@ func (h *Handler) SyncSource(w http.ResponseWriter, r *http.Request) {
 		h.writeError(w, r, err)
 		return
 	}
-	var src *Source
+	var src *releases.Source
 	for i := range srcs {
 		if srcs[i].ID == id {
 			s := srcs[i]
@@ -231,7 +233,7 @@ func (h *Handler) SyncSource(w http.ResponseWriter, r *http.Request) {
 		response.Error(w, r, http.StatusNotFound, "not_found", "Источник не найден")
 		return
 	}
-	if !auth.CanActivateRelease(actor.Role, environment.Dev) {
+	if !auth.CanActivateRelease(string(actor.Role), environment.Dev) {
 		response.Error(w, r, http.StatusForbidden, "forbidden", "Недостаточно прав для импорта релиза")
 		return
 	}
@@ -254,7 +256,7 @@ func (h *Handler) ListReleasesForSource(w http.ResponseWriter, r *http.Request) 
 		h.writeError(w, r, err)
 		return
 	}
-	var src *Source
+	var src *releases.Source
 	for i := range srcs {
 		if srcs[i].ID == id {
 			s := srcs[i]
@@ -266,8 +268,8 @@ func (h *Handler) ListReleasesForSource(w http.ResponseWriter, r *http.Request) 
 		response.Error(w, r, http.StatusNotFound, "not_found", "Источник не найден")
 		return
 	}
-	p := h.service.provider()
-	pr, err := p.forSource(*src)
+	p := h.provider()
+	pr, err := p.ForSource(*src)
 	if err != nil {
 		h.writeError(w, r, err)
 		return
@@ -280,4 +282,4 @@ func (h *Handler) ListReleasesForSource(w http.ResponseWriter, r *http.Request) 
 	response.JSON(w, http.StatusOK, map[string]any{"items": rels})
 }
 
-func (h *Handler) provider() *Provider { return h.service.provider() }
+func (h *Handler) provider() *releases.Provider { return h.provider() }

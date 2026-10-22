@@ -9,7 +9,7 @@ import (
 	"fmt"
 	"os"
 
-	"websiteengine/internal/models"
+	"websiteengine/pkg/models"
 )
 
 func main() {

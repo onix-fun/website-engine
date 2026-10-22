@@ -6,22 +6,23 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
+	"websiteengine/features/auth"
+	"websiteengine/features/content"
+	"websiteengine/pkg/principal"
 
 	"github.com/google/uuid"
 
-	"websiteengine/features/auth"
-	"websiteengine/features/features"
 	"websiteengine/pkg/environment"
-	"websiteengine/presentation/http/response"
+	"websiteengine/pkg/response"
 )
 
 type Handler struct {
-	service *Service
+	service *content.Service
 	log     *slog.Logger
 	maxJSON int64
 }
 
-func NewHandler(service *Service, log *slog.Logger, maxJSON int64) *Handler {
+func NewHandler(service *content.Service, log *slog.Logger, maxJSON int64) *Handler {
 	return &Handler{service: service, log: log, maxJSON: maxJSON}
 }
 
@@ -49,7 +50,7 @@ type dataRequest struct {
 }
 
 func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
-	actor, _ := auth.PrincipalFromContext(r.Context())
+	actor, _ := principal.FromContext(r.Context())
 	featureID, ok := uuidParam(w, r, "id", "Feature не найдена")
 	if !ok {
 		return
@@ -86,7 +87,7 @@ type draftRequest struct {
 }
 
 func (h *Handler) SaveDraft(w http.ResponseWriter, r *http.Request) {
-	actor, _ := auth.PrincipalFromContext(r.Context())
+	actor, _ := principal.FromContext(r.Context())
 	id, ok := uuidParam(w, r, "id", "Запись не найдена")
 	if !ok {
 		return
@@ -109,7 +110,7 @@ type revisionRequest struct {
 }
 
 func (h *Handler) Publish(w http.ResponseWriter, r *http.Request) {
-	actor, _ := auth.PrincipalFromContext(r.Context())
+	actor, _ := principal.FromContext(r.Context())
 	id, ok := uuidParam(w, r, "id", "Запись не найдена")
 	if !ok {
 		return
@@ -132,7 +133,7 @@ type promoteRequest struct {
 }
 
 func (h *Handler) Promote(w http.ResponseWriter, r *http.Request) {
-	actor, _ := auth.PrincipalFromContext(r.Context())
+	actor, _ := principal.FromContext(r.Context())
 	id, ok := uuidParam(w, r, "id", "Запись не найдена")
 	if !ok {
 		return
@@ -156,7 +157,7 @@ type rollbackRequest struct {
 }
 
 func (h *Handler) Rollback(w http.ResponseWriter, r *http.Request) {
-	actor, _ := auth.PrincipalFromContext(r.Context())
+	actor, _ := principal.FromContext(r.Context())
 	id, ok := uuidParam(w, r, "id", "Запись не найдена")
 	if !ok {
 		return
@@ -171,7 +172,7 @@ func (h *Handler) Rollback(w http.ResponseWriter, r *http.Request) {
 		response.Error(w, r, http.StatusBadRequest, "invalid_environment", err.Error())
 		return
 	}
-	if !auth.CanRollbackContent(actor.Role, env) {
+	if !auth.CanRollbackContent(string(actor.Role), env) {
 		response.Error(w, r, http.StatusForbidden, "forbidden", "Недостаточно прав для отката в этой среде")
 		return
 	}
@@ -188,7 +189,7 @@ type environmentRequest struct {
 }
 
 func (h *Handler) Unpublish(w http.ResponseWriter, r *http.Request) {
-	actor, _ := auth.PrincipalFromContext(r.Context())
+	actor, _ := principal.FromContext(r.Context())
 	id, ok := uuidParam(w, r, "id", "Запись не найдена")
 	if !ok {
 		return
@@ -203,7 +204,7 @@ func (h *Handler) Unpublish(w http.ResponseWriter, r *http.Request) {
 		response.Error(w, r, http.StatusBadRequest, "invalid_environment", err.Error())
 		return
 	}
-	if !auth.CanUnpublishContent(actor.Role, env) {
+	if !auth.CanUnpublishContent(string(actor.Role), env) {
 		response.Error(w, r, http.StatusForbidden, "forbidden", "Недостаточно прав для снятия с публикации в этой среде")
 		return
 	}
@@ -346,8 +347,8 @@ func nullable(s string) any {
 }
 
 func (h *Handler) writeError(w http.ResponseWriter, r *http.Request, err error) {
-	var validationErr *ValidationError
-	var conflictErr *ConflictError
+	var validationErr *content.ValidationError
+	var conflictErr *content.ConflictError
 	switch {
 	case errors.As(err, &validationErr):
 		details := make([]response.ErrorDetail, 0, len(validationErr.Details))
@@ -361,11 +362,11 @@ func (h *Handler) writeError(w http.ResponseWriter, r *http.Request, err error) 
 		response.Error(w, r, http.StatusBadRequest, "validation_failed", validationErr.Message)
 	case errors.As(err, &conflictErr):
 		response.Error(w, r, http.StatusConflict, "conflict", conflictErr.Message)
-	case errors.Is(err, features.ErrNotFound), errors.Is(err, ErrNotFound):
+	case errors.Is(err, content.ErrNotFound), errors.Is(err, content.ErrNotFound):
 		response.Error(w, r, http.StatusNotFound, "not_found", "Запись или Feature не найдены")
-	case errors.Is(err, ErrConflict):
+	case errors.Is(err, content.ErrConflict):
 		response.Error(w, r, http.StatusConflict, "conflict", "Конфликт состояния записи")
-	case errors.Is(err, ErrValidation):
+	case errors.Is(err, content.ErrValidation):
 		response.Error(w, r, http.StatusBadRequest, "validation_failed", "Некорректные данные")
 	default:
 		h.log.Error("content operation failed", "request_id", response.RequestID(r.Context()), "error", err)
@@ -374,13 +375,13 @@ func (h *Handler) writeError(w http.ResponseWriter, r *http.Request, err error) 
 }
 
 func (h *Handler) writePublicError(w http.ResponseWriter, r *http.Request, err error) {
-	var conflictErr *ConflictError
+	var conflictErr *content.ConflictError
 	switch {
 	case errors.As(err, &conflictErr):
 		response.Error(w, r, http.StatusConflict, "conflict", conflictErr.Message)
-	case errors.Is(err, ErrNotFound), errors.Is(err, features.ErrNotFound):
+	case errors.Is(err, content.ErrNotFound), errors.Is(err, content.ErrNotFound):
 		response.Error(w, r, http.StatusNotFound, "not_found", "Опубликованный контент не найден")
-	case errors.Is(err, ErrValidation):
+	case errors.Is(err, content.ErrValidation):
 		response.Error(w, r, http.StatusBadRequest, "validation_failed", "Некорректный запрос")
 	default:
 		h.log.Error("public content failed", "request_id", response.RequestID(r.Context()), "error", err)

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"time"
+	"websiteengine/pkg/principal"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -18,8 +19,8 @@ func NewRepository(pool *pgxpool.Pool) *Repository {
 	return &Repository{pool: pool}
 }
 
-func (r *Repository) FindActiveByHash(ctx context.Context, hash []byte) (Principal, error) {
-	var p Principal
+func (r *Repository) FindActiveByHash(ctx context.Context, hash []byte) (principal.Principal, error) {
+	var p principal.Principal
 	err := r.pool.QueryRow(ctx, `
 		SELECT id, name, role, created_by, expires_at, created_at
 		  FROM access_tokens
@@ -29,8 +30,9 @@ func (r *Repository) FindActiveByHash(ctx context.Context, hash []byte) (Princip
 		hash,
 	).Scan(&p.TokenID, &p.Name, &p.Role, &p.CreatedBy, &p.ExpiresAt, &p.CreatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return Principal{}, ErrUnauthorized
+		return principal.Principal{}, ErrUnauthorized
 	}
+	p.ID = p.TokenID
 	return p, err
 }
 

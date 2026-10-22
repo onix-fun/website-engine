@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 	"time"
+	"websiteengine/pkg/principal"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -60,7 +61,7 @@ func (s *Service) Bootstrap(ctx context.Context, secret string) (bool, error) {
 	if used {
 		return false, nil
 	}
-	_, err = s.repo.Create(ctx, uuid.New(), "bootstrap admin", hash, RoleAdmin, nil, nil)
+	_, err = s.repo.Create(ctx, uuid.New(), "bootstrap admin", hash, string(RoleAdmin), nil, nil)
 	if err != nil {
 		// Two instances starting at once can race; the unique token hash makes
 		// that safe, and neither instance should fail because of it.
@@ -84,7 +85,7 @@ func (s *Service) Create(ctx context.Context, actor Principal, name, role string
 	if !ValidRole(role) {
 		return NewToken{}, ErrValidation
 	}
-	if actor.Role == RoleModerator && role != RoleUser {
+	if actor.Role == principal.Role(RoleModerator) || actor.Role == principal.Role("moderator") && principal.Role(role) != principal.RoleUser {
 		return NewToken{}, ErrForbidden
 	}
 	if expiresAt != nil {
@@ -99,7 +100,7 @@ func (s *Service) Create(ctx context.Context, actor Principal, name, role string
 		return NewToken{}, err
 	}
 	creator := actor.TokenID
-	token, err := s.repo.Create(ctx, uuid.New(), name, HashSecret(secret), role, &creator, expiresAt)
+	token, err := s.repo.Create(ctx, uuid.New(), name, HashSecret(secret), string(role), &creator, expiresAt)
 	if err != nil {
 		return NewToken{}, err
 	}
@@ -111,7 +112,7 @@ func (s *Service) List(ctx context.Context, actor Principal) ([]Token, error) {
 		return nil, ErrForbidden
 	}
 	var creator *uuid.UUID
-	if actor.Role == RoleModerator {
+	if actor.Role == principal.Role(RoleModerator) || actor.Role == principal.Role("moderator") {
 		id := actor.TokenID
 		creator = &id
 	}
@@ -126,7 +127,7 @@ func (s *Service) Get(ctx context.Context, actor Principal, id uuid.UUID) (Token
 	if err != nil {
 		return Token{}, err
 	}
-	if actor.Role == RoleModerator && (token.CreatedBy == nil || *token.CreatedBy != actor.TokenID) {
+	if actor.Role == principal.Role(RoleModerator) || actor.Role == principal.Role("moderator") && (token.CreatedBy == nil || *token.CreatedBy != actor.TokenID) {
 		return Token{}, ErrNotFound
 	}
 	return token, nil
@@ -140,7 +141,7 @@ func (s *Service) Revoke(ctx context.Context, actor Principal, id uuid.UUID) err
 	if err != nil {
 		return err
 	}
-	if actor.Role == RoleModerator && (token.CreatedBy == nil || *token.CreatedBy != actor.TokenID) {
+	if actor.Role == principal.Role(RoleModerator) || actor.Role == principal.Role("moderator") && (token.CreatedBy == nil || *token.CreatedBy != actor.TokenID) {
 		return ErrNotFound
 	}
 	return s.repo.Revoke(ctx, id)

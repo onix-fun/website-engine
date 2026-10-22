@@ -8,15 +8,15 @@ import (
 	"regexp"
 	"strings"
 	"unicode/utf8"
+	"websiteengine/pkg/principal"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgconn"
 
-	"websiteengine/features/auth"
 	"websiteengine/pkg/environment"
-	"websiteengine/internal/platform/validate"
+	"websiteengine/pkg/platform/validate"
 	"websiteengine/pkg/publication"
-	"websiteengine/presentation/http/response"
+	"websiteengine/pkg/response"
 )
 
 var keyPattern = regexp.MustCompile(`^[a-z][a-z0-9_-]{0,99}$`)
@@ -56,7 +56,7 @@ type CreateInput struct {
 	Type string `json:"type"`
 }
 
-func (s *Service) Create(ctx context.Context, actor auth.Principal, in CreateInput) (Detail, error) {
+func (s *Service) Create(ctx context.Context, actor principal.Principal, in CreateInput) (Detail, error) {
 	in.Key = strings.TrimSpace(in.Key)
 	in.Name = strings.TrimSpace(in.Name)
 	if !keyPattern.MatchString(in.Key) {
@@ -184,7 +184,7 @@ func (s *Service) DraftState(ctx context.Context, id uuid.UUID) (DraftState, err
 }
 
 // SaveDraft creates or updates the single editable draft schema version.
-func (s *Service) SaveDraft(ctx context.Context, actor auth.Principal, id uuid.UUID, expectedRevision int64, schema json.RawMessage) (DraftState, error) {
+func (s *Service) SaveDraft(ctx context.Context, actor principal.Principal, id uuid.UUID, expectedRevision int64, schema json.RawMessage) (DraftState, error) {
 	if expectedRevision < 1 {
 		return DraftState{}, &ValidationError{Message: "revision обязателен"}
 	}
@@ -250,7 +250,7 @@ func (s *Service) SaveDraft(ctx context.Context, actor auth.Principal, id uuid.U
 }
 
 // Publish promotes the current draft schema to dev.
-func (s *Service) Publish(ctx context.Context, actor auth.Principal, id uuid.UUID, expectedRevision int64) (Detail, error) {
+func (s *Service) Publish(ctx context.Context, actor principal.Principal, id uuid.UUID, expectedRevision int64) (Detail, error) {
 	if expectedRevision < 1 {
 		return Detail{}, &ValidationError{Message: "revision обязателен"}
 	}
@@ -311,7 +311,7 @@ func (s *Service) Publish(ctx context.Context, actor auth.Principal, id uuid.UUI
 }
 
 // Promote switches the prod schema pointer to the current dev schema.
-func (s *Service) Promote(ctx context.Context, actor auth.Principal, id uuid.UUID, expectedRevision int64) (Detail, error) {
+func (s *Service) Promote(ctx context.Context, actor principal.Principal, id uuid.UUID, expectedRevision int64) (Detail, error) {
 	if expectedRevision < 1 {
 		return Detail{}, &ValidationError{Message: "revision обязателен"}
 	}
@@ -366,7 +366,7 @@ func (s *Service) Promote(ctx context.Context, actor auth.Principal, id uuid.UUI
 }
 
 // Rollback points an environment at an existing published schema version.
-func (s *Service) Rollback(ctx context.Context, actor auth.Principal, id uuid.UUID, versionNumber int, env environment.Environment) (Detail, error) {
+func (s *Service) Rollback(ctx context.Context, actor principal.Principal, id uuid.UUID, versionNumber int, env environment.Environment) (Detail, error) {
 	if versionNumber < 1 {
 		return Detail{}, &ValidationError{Message: "version должен быть положительным"}
 	}

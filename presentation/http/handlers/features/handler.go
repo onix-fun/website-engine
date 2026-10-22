@@ -6,21 +6,23 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
+	"websiteengine/features/auth"
+	"websiteengine/features/features"
+	"websiteengine/pkg/principal"
 
 	"github.com/google/uuid"
 
-	"websiteengine/features/auth"
 	"websiteengine/pkg/environment"
-	"websiteengine/presentation/http/response"
+	"websiteengine/pkg/response"
 )
 
 type Handler struct {
-	service *Service
+	service *features.Service
 	log     *slog.Logger
 	maxJSON int64
 }
 
-func NewHandler(service *Service, log *slog.Logger, maxJSON int64) *Handler {
+func NewHandler(service *features.Service, log *slog.Logger, maxJSON int64) *Handler {
 	return &Handler{service: service, log: log, maxJSON: maxJSON}
 }
 
@@ -39,12 +41,16 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
-	actor, _ := auth.PrincipalFromContext(r.Context())
-	if !auth.CanCreateFeature(actor.Role) {
-		response.Error(w, r, http.StatusForbidden, "forbidden", "Недостаточно прав для создания Feature")
+	actor, ok := principal.FromContext(r.Context())
+	if !ok {
+		response.Error(w, r, http.StatusUnauthorized, "unauthorized", "Требуется авторизация")
 		return
 	}
-	var in CreateInput
+	if !auth.CanCreateFeature(string(actor.Role)) {
+		response.Error(w, r, http.StatusForbidden, "forbidden", "Недостаточно прав для создания Feature: "+string(actor.Role))
+		return
+	}
+	var in features.CreateInput
 	if err := response.DecodeJSON(w, r, &in, h.maxJSON); err != nil {
 		response.WriteDecodeError(w, r, err)
 		return
@@ -142,7 +148,7 @@ type saveDraftRequest struct {
 }
 
 func (h *Handler) SaveDraft(w http.ResponseWriter, r *http.Request) {
-	actor, _ := auth.PrincipalFromContext(r.Context())
+	actor, _ := principal.FromContext(r.Context())
 	id, ok := featureID(w, r)
 	if !ok {
 		return
@@ -165,7 +171,7 @@ type revisionRequest struct {
 }
 
 func (h *Handler) Publish(w http.ResponseWriter, r *http.Request) {
-	actor, _ := auth.PrincipalFromContext(r.Context())
+	actor, _ := principal.FromContext(r.Context())
 	id, ok := featureID(w, r)
 	if !ok {
 		return
@@ -188,7 +194,7 @@ type promoteRequest struct {
 }
 
 func (h *Handler) Promote(w http.ResponseWriter, r *http.Request) {
-	actor, _ := auth.PrincipalFromContext(r.Context())
+	actor, _ := principal.FromContext(r.Context())
 	id, ok := featureID(w, r)
 	if !ok {
 		return
@@ -212,7 +218,7 @@ type rollbackRequest struct {
 }
 
 func (h *Handler) Rollback(w http.ResponseWriter, r *http.Request) {
-	actor, _ := auth.PrincipalFromContext(r.Context())
+	actor, _ := principal.FromContext(r.Context())
 	id, ok := featureID(w, r)
 	if !ok {
 		return
@@ -227,7 +233,7 @@ func (h *Handler) Rollback(w http.ResponseWriter, r *http.Request) {
 		response.Error(w, r, http.StatusBadRequest, "invalid_environment", err.Error())
 		return
 	}
-	if !auth.CanRollbackContent(actor.Role, env) {
+	if !auth.CanRollbackContent(string(actor.Role), env) {
 		response.Error(w, r, http.StatusForbidden, "forbidden", "Недостаточно прав для отката в этой среде")
 		return
 	}
@@ -256,9 +262,9 @@ func nullableString(s string) any {
 }
 
 func (h *Handler) writeError(w http.ResponseWriter, r *http.Request, err error) {
-	var validationErr *ValidationError
-	var schemaErr *SchemaValidationError
-	var conflictErr *ConflictError
+	var validationErr *features.ValidationError
+	var schemaErr *features.SchemaValidationError
+	var conflictErr *features.ConflictError
 	switch {
 	case errors.As(err, &schemaErr):
 		details := make([]response.ErrorDetail, 0, len(schemaErr.Details))
@@ -270,9 +276,9 @@ func (h *Handler) writeError(w http.ResponseWriter, r *http.Request, err error) 
 		response.Error(w, r, http.StatusBadRequest, "validation_failed", validationErr.Message)
 	case errors.As(err, &conflictErr):
 		response.Error(w, r, http.StatusConflict, "conflict", conflictErr.Message)
-	case errors.Is(err, ErrNotFound):
+	case errors.Is(err, features.ErrNotFound):
 		response.Error(w, r, http.StatusNotFound, "not_found", "Feature не найдена")
-	case errors.Is(err, ErrConflict):
+	case errors.Is(err, features.ErrConflict):
 		response.Error(w, r, http.StatusConflict, "conflict", "Конфликт состояния Feature")
 	default:
 		h.log.Error("feature operation failed", "request_id", response.RequestID(r.Context()), "error", err)

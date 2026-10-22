@@ -2,6 +2,7 @@ package middleware
 
 import (
 	"context"
+
 	"errors"
 	"log/slog"
 	"net"
@@ -10,16 +11,17 @@ import (
 	"runtime/debug"
 	"strings"
 	"time"
+	"websiteengine/features/auth"
+	"websiteengine/pkg/principal"
 
 	"github.com/google/uuid"
 
-	"websiteengine/features/auth"
 	"websiteengine/pkg/environment"
-	"websiteengine/presentation/http/response"
+	"websiteengine/pkg/response"
 )
 
-func PrincipalFrom(ctx context.Context) (auth.Principal, bool) {
-	return auth.PrincipalFromContext(ctx)
+func PrincipalFrom(ctx context.Context) (principal.Principal, bool) {
+	return principal.FromContext(ctx)
 }
 
 var safeRequestID = regexp.MustCompile(`^[A-Za-z0-9._:-]{1,128}$`)
@@ -137,7 +139,7 @@ func Authenticate(service *auth.Service, log *slog.Logger) func(http.Handler) ht
 				response.Error(w, r, http.StatusUnauthorized, "unauthorized", "Требуется действующий Bearer-токен")
 				return
 			}
-			principal, err := service.Authenticate(r.Context(), secret)
+			pr, err := service.Authenticate(r.Context(), secret)
 			if err != nil {
 				if errors.Is(err, auth.ErrUnauthorized) {
 					w.Header().Set("WWW-Authenticate", "Bearer")
@@ -148,7 +150,7 @@ func Authenticate(service *auth.Service, log *slog.Logger) func(http.Handler) ht
 				response.Error(w, r, http.StatusServiceUnavailable, "auth_unavailable", "Авторизация временно недоступна")
 				return
 			}
-			next.ServeHTTP(w, r.WithContext(auth.WithPrincipal(r.Context(), principal)))
+			next.ServeHTTP(w, r.WithContext(principal.WithPrincipal(r.Context(), pr)))
 		})
 	}
 }

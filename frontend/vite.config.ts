@@ -13,7 +13,7 @@ export default defineConfig({
     },
   },
   build: {
-    outDir: "../internal/transport/static/dist",
+    outDir: "../pkg/static/dist",
     emptyOutDir: true,
     sourcemap: false,
     chunkSizeWarningLimit: 900,

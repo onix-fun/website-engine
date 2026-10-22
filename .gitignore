@@ -5,4 +5,4 @@
 frontend/node_modules/
 .pnpm-store/
 frontend/dist/
-internal/transport/static/dist/assets/
+pkg/static/dist/assets/

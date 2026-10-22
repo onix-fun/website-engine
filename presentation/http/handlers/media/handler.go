@@ -10,20 +10,21 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"websiteengine/features/media"
+	"websiteengine/pkg/principal"
 
 	"github.com/google/uuid"
 
-	"websiteengine/features/auth"
-	"websiteengine/presentation/http/response"
+	"websiteengine/pkg/response"
 )
 
 type Handler struct {
-	service   *Service
+	service   *media.Service
 	log       *slog.Logger
 	maxUpload int64
 }
 
-func NewHandler(service *Service, log *slog.Logger, maxUpload int64) *Handler {
+func NewHandler(service *media.Service, log *slog.Logger, maxUpload int64) *Handler {
 	return &Handler{service: service, log: log, maxUpload: maxUpload}
 }
 
@@ -85,8 +86,8 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 }
 
 // parseListFilters reads the optional list filters from the query string.
-func parseListFilters(q url.Values) (ListFilters, error) {
-	f := ListFilters{
+func parseListFilters(q url.Values) (media.ListFilters, error) {
+	f := media.ListFilters{
 		Status: q.Get("status"),
 		Search: q.Get("q"),
 		Type:   q.Get("type"),
@@ -231,7 +232,7 @@ func (h *Handler) Redirect(w http.ResponseWriter, r *http.Request) {
 	}
 	url, err := h.service.RedirectURL(r.Context(), id, r.URL.Query().Get("variant"))
 	if err != nil {
-		if errors.Is(err, ErrNotFound) {
+		if errors.Is(err, media.ErrNotFound) {
 			response.Error(w, r, http.StatusNotFound, "not_found", "Медиаобъект не найден")
 			return
 		}
@@ -253,8 +254,8 @@ func mediaID(w http.ResponseWriter, r *http.Request) (uuid.UUID, bool) {
 	return id, true
 }
 
-func currentActor(r *http.Request) auth.Principal {
-	p, _ := auth.PrincipalFromContext(r.Context())
+func currentActor(r *http.Request) principal.Principal {
+	p, _ := principal.FromContext(r.Context())
 	return p
 }
 
@@ -266,8 +267,8 @@ func nullable(s string) any {
 }
 
 func (h *Handler) writeError(w http.ResponseWriter, r *http.Request, err error) {
-	var validationErr *ValidationError
-	var conflictErr *ConflictError
+	var validationErr *media.ValidationError
+	var conflictErr *media.ConflictError
 	switch {
 	case errors.As(err, &validationErr):
 		code := "validation_failed"
@@ -282,9 +283,9 @@ func (h *Handler) writeError(w http.ResponseWriter, r *http.Request, err error) 
 		response.Error(w, r, status, code, validationErr.Message)
 	case errors.As(err, &conflictErr):
 		response.Error(w, r, http.StatusConflict, "conflict", conflictErr.Message)
-	case errors.Is(err, ErrProcessing):
+	case errors.Is(err, media.ErrProcessing):
 		response.Error(w, r, http.StatusUnprocessableEntity, "media_processing_failed", "Не удалось обработать медиафайл")
-	case errors.Is(err, ErrNotFound):
+	case errors.Is(err, media.ErrNotFound):
 		response.Error(w, r, http.StatusNotFound, "not_found", "Медиаобъект не найден")
 	default:
 		h.log.Error("media operation failed", "request_id", response.RequestID(r.Context()), "error", err)

@@ -23,15 +23,20 @@ import (
 
 	"websiteengine/features/auth"
 	"websiteengine/features/content"
-	"websiteengine/pkg/postgres"
 	"websiteengine/features/features"
 	"websiteengine/features/forms"
 	"websiteengine/features/media"
 	"websiteengine/features/overview"
-	"websiteengine/features/settings"
-	"websiteengine/internal/storage"
-	httptransport "websiteengine/presentation/http"
 	"websiteengine/migrations"
+	"websiteengine/pkg/postgres"
+	"websiteengine/pkg/storage"
+	httptransport "websiteengine/presentation/http"
+	hauth "websiteengine/presentation/http/handlers/auth"
+	hcontent "websiteengine/presentation/http/handlers/content"
+	hfeatures "websiteengine/presentation/http/handlers/features"
+	hforms "websiteengine/presentation/http/handlers/forms"
+	hmedia "websiteengine/presentation/http/handlers/media"
+	hoverview "websiteengine/presentation/http/handlers/overview"
 )
 
 const testAdminToken = "test-admin-token-at-least-24-characters"
@@ -125,20 +130,12 @@ func newTestEnv(t *testing.T) *testEnv {
 
 	router := httptransport.NewRouter(httptransport.Dependencies{
 		Log: log, AuthService: authService,
-		Auth:     auth.NewHandler(authService, log, 1<<20),
-		Features: features.NewHandler(featureService, log, 1<<20),
-		Content:  content.NewHandler(contentService, log, 1<<20),
-		Forms:    forms.NewHandler(formsService, log, 1<<20),
-		Media:    media.NewHandler(mediaService, log, 20<<20),
-		Overview: overview.NewHandler(overview.NewRepository(pool), log),
-		Settings: settings.NewHandler(settings.Config{
-			MaxJSONBytes: 1 << 20, MaxUploadBytes: 20 << 20,
-			FormRateLimit: 10000, FormRateWindowSeconds: 60,
-			PublicCORSOrigins:       []string{"https://site.example"},
-			AdminPageSize:           200,
-			PublicPageSize:          50,
-			SubmissionExportMaxRows: 10000,
-		}),
+		Auth:              hauth.NewHandler(authService, log, 1<<20),
+		Features:          hfeatures.NewHandler(featureService, log, 1<<20),
+		Content:           hcontent.NewHandler(contentService, log, 1<<20),
+		Forms:             hforms.NewHandler(formsService, log, 1<<20),
+		Media:             hmedia.NewHandler(mediaService, log, 20<<20),
+		Overview:          hoverview.NewHandler(overview.NewRepository(pool), log),
 		Health:            func(context.Context) error { return nil },
 		MaxJSONBytes:      1 << 20,
 		FormRateLimit:     10000,

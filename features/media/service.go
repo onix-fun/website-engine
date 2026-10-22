@@ -11,10 +11,10 @@ import (
 	"strings"
 	"time"
 	"unicode/utf8"
+	"websiteengine/pkg/principal"
 
 	"github.com/google/uuid"
 
-	"websiteengine/features/auth"
 	"websiteengine/pkg/storage"
 )
 
@@ -30,7 +30,7 @@ func NewService(repo *Repository, store storage.ObjectStore, maxUpload int64) *S
 	return &Service{repo: repo, store: store, maxUpload: maxUpload}
 }
 
-func (s *Service) Upload(ctx context.Context, actor auth.Principal, filename string, data []byte) (Media, error) {
+func (s *Service) Upload(ctx context.Context, actor principal.Principal, filename string, data []byte) (Media, error) {
 	if len(data) == 0 {
 		return Media{}, &ValidationError{Message: "Файл пуст"}
 	}

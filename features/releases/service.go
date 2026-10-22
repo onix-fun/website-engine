@@ -11,10 +11,10 @@ import (
 	"regexp"
 	"strings"
 	"time"
+	"websiteengine/pkg/principal"
 
 	"github.com/google/uuid"
 
-	"websiteengine/features/auth"
 	"websiteengine/pkg/artifact"
 	"websiteengine/pkg/environment"
 	"websiteengine/pkg/secrets"
@@ -47,7 +47,7 @@ type ImportInput struct {
 
 var versionPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._+-]{0,199}$`)
 
-func (s *Service) ImportManual(ctx context.Context, actor auth.Principal, in ImportInput) (Release, error) {
+func (s *Service) ImportManual(ctx context.Context, actor principal.Principal, in ImportInput) (Release, error) {
 	version := strings.TrimSpace(in.Version)
 	if !versionPattern.MatchString(version) {
 		return Release{}, errors.New("version must be 1-200 URL-safe characters")
@@ -118,7 +118,7 @@ func (s *Service) ImportManual(ctx context.Context, actor auth.Principal, in Imp
 	return s.repo.ReleaseByID(ctx, id)
 }
 
-func (s *Service) Activate(ctx context.Context, actor auth.Principal, env environment.Environment, releaseID uuid.UUID) (Release, error) {
+func (s *Service) Activate(ctx context.Context, actor principal.Principal, env environment.Environment, releaseID uuid.UUID) (Release, error) {
 	if !env.Valid() {
 		return Release{}, errors.New("environment must be dev or prod")
 	}
@@ -139,7 +139,7 @@ func (s *Service) Activate(ctx context.Context, actor auth.Principal, env enviro
 	return rel, nil
 }
 
-func (s *Service) Rollback(ctx context.Context, actor auth.Principal, env environment.Environment, releaseID uuid.UUID) (Release, error) {
+func (s *Service) Rollback(ctx context.Context, actor principal.Principal, env environment.Environment, releaseID uuid.UUID) (Release, error) {
 	if !env.Valid() {
 		return Release{}, errors.New("environment must be dev or prod")
 	}
@@ -191,7 +191,7 @@ type SourceInput struct {
 	Enabled      bool
 }
 
-func (s *Service) CreateSource(ctx context.Context, actor auth.Principal, in SourceInput) (Source, error) {
+func (s *Service) CreateSource(ctx context.Context, actor principal.Principal, in SourceInput) (Source, error) {
 	if in.Provider != "manual" && in.Provider != "github" && in.Provider != "gitlab" && in.Provider != "gitea" {
 		return Source{}, errors.New("provider must be manual, github, gitlab or gitea")
 	}
@@ -291,7 +291,7 @@ func NewProvider() *Provider {
 	}
 }
 
-func (p *Provider) forSource(src Source) (releaseprovider.Provider, error) {
+func (p *Provider) ForSource(src Source) (releaseprovider.Provider, error) {
 	switch src.Provider {
 	case "github":
 		return p.github, nil
@@ -304,8 +304,8 @@ func (p *Provider) forSource(src Source) (releaseprovider.Provider, error) {
 	}
 }
 
-func (s *Service) SyncFromSource(ctx context.Context, actor auth.Principal, src Source, assetURL string) (Release, error) {
-	p, err := s.provider().forSource(src)
+func (s *Service) SyncFromSource(ctx context.Context, actor principal.Principal, src Source, assetURL string) (Release, error) {
+	p, err := s.Provider().ForSource(src)
 	if err != nil {
 		return Release{}, err
 	}
@@ -374,7 +374,7 @@ func (s *Service) SyncFromSource(ctx context.Context, actor auth.Principal, src 
 	return s.repo.ReleaseByID(ctx, id)
 }
 
-func (s *Service) provider() *Provider {
+func (s *Service) Provider() *Provider {
 	if s.prov == nil {
 		s.prov = NewProvider()
 	}

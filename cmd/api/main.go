@@ -18,16 +18,21 @@ import (
 	"websiteengine/features/media"
 	"websiteengine/features/overview"
 	"websiteengine/features/releases"
-	"websiteengine/features/settings"
+	"websiteengine/migrations"
+	"websiteengine/pkg/config"
 	"websiteengine/pkg/environment"
+	"websiteengine/pkg/postgres"
 	"websiteengine/pkg/secrets"
 	"websiteengine/pkg/site"
 	"websiteengine/pkg/storage/s3"
-	"websiteengine/migrations"
-	"websiteengine/pkg/config"
-	"websiteengine/pkg/postgres"
 	httptransport "websiteengine/presentation/http"
-	"websiteengine/presentation/http/middleware"
+	hauth "websiteengine/presentation/http/handlers/auth"
+	hcontent "websiteengine/presentation/http/handlers/content"
+	hfeatures "websiteengine/presentation/http/handlers/features"
+	hforms "websiteengine/presentation/http/handlers/forms"
+	hmedia "websiteengine/presentation/http/handlers/media"
+	hoverview "websiteengine/presentation/http/handlers/overview"
+	hreleases "websiteengine/presentation/http/handlers/releases"
 )
 
 // run starts the API server. The page-size constants mirror the limits that
@@ -111,35 +116,24 @@ func run(log *slog.Logger) error {
 
 	featureRepo := features.NewRepository(pool)
 	featureService := features.NewService(featureRepo)
-	featureHandler := features.NewHandler(featureService, log, cfg.MaxJSONBytes)
+	featureHandler := hfeatures.NewHandler(featureService, log, cfg.MaxJSONBytes)
 
 	contentRepo := content.NewRepository(pool)
 	contentService := content.NewService(contentRepo, featureRepo)
-	contentHandler := content.NewHandler(contentService, log, cfg.MaxJSONBytes)
+	contentHandler := hcontent.NewHandler(contentService, log, cfg.MaxJSONBytes)
 
 	formsRepo := forms.NewRepository(pool)
 	formsService := forms.NewService(formsRepo, featureRepo)
-	formsHandler := forms.NewHandler(formsService, log, cfg.MaxJSONBytes)
+	formsHandler := hforms.NewHandler(formsService, log, cfg.MaxJSONBytes)
 
 	mediaRepo := media.NewRepository(pool)
 	mediaService := media.NewService(mediaRepo, objectStore, cfg.MaxUploadBytes)
-	mediaHandler := media.NewHandler(mediaService, log, cfg.MaxUploadBytes)
+	mediaHandler := hmedia.NewHandler(mediaService, log, cfg.MaxUploadBytes)
 
 	overviewRepo := overview.NewRepository(pool)
-	overviewHandler := overview.NewHandler(overviewRepo, log)
+	overviewHandler := hoverview.NewHandler(overviewRepo, log)
 
-	settingsHandler := settings.NewHandler(settings.Config{
-		MaxJSONBytes:            cfg.MaxJSONBytes,
-		MaxUploadBytes:          cfg.MaxUploadBytes,
-		FormRateLimit:           cfg.FormRateLimit,
-		FormRateWindowSeconds:   int(cfg.FormRateWindow.Seconds()),
-		PublicCORSOrigins:       cfg.PublicCORSOrigins,
-		AdminPageSize:           adminPageSize,
-		PublicPageSize:          publicPageSize,
-		SubmissionExportMaxRows: submissionExportMaxRows,
-	})
-
-	authHandler := auth.NewHandler(authService, log, cfg.MaxJSONBytes)
+	authHandler := hauth.NewHandler(authService, log, cfg.MaxJSONBytes)
 
 	health := func(checkCtx context.Context) error {
 		if err := pool.Ping(checkCtx); err != nil {
@@ -162,22 +156,22 @@ func run(log *slog.Logger) error {
 		}
 	}
 	releaseService := releases.NewService(releaseRepo, objectStore, box, cfg.MaxReleaseBytes)
-	releaseHandler := releases.NewHandler(releaseService, log, cfg.MaxReleaseBytes)
+	releaseHandler := hreleases.NewHandler(releaseService, log, cfg.MaxReleaseBytes)
 	siteManager := site.NewManager(site.NewRepository(pool), objectStore, cfg.ReleaseCacheDir)
 
 	deps := httptransport.Dependencies{
 		Log: log, AuthService: authService, Auth: authHandler,
 		Features: featureHandler, Content: contentHandler, Forms: formsHandler, Media: mediaHandler,
 		Overview: overviewHandler, Health: health, MaxJSONBytes: cfg.MaxJSONBytes,
-		Settings: settingsHandler, Releases: releaseHandler, Site: siteManager,
+		Releases: releaseHandler, Site: siteManager,
 		FormRateLimit: cfg.FormRateLimit, FormRateWindow: cfg.FormRateWindow,
 		TrustProxy: cfg.TrustProxyHeaders, PublicCORSOrigins: cfg.PublicCORSOrigins, PublicCORSByEnv: cfg.PublicCORSByEnv,
 	}
 
 	servers := []*http.Server{
 		newServer(cfg.HTTPAddr, httptransport.NewRouter(deps), cfg),
-		newServer(cfg.DevHTTPAddr, middleware.WithEnvironment(environment.Dev)(httptransport.NewPublicRouter(deps, environment.Dev, cfg.DevPublicBaseURL)), cfg),
-		newServer(cfg.ProdHTTPAddr, middleware.WithEnvironment(environment.Prod)(httptransport.NewPublicRouter(deps, environment.Prod, cfg.ProdPublicBaseURL)), cfg),
+		newServer(cfg.DevHTTPAddr, httptransport.NewPublicRouter(deps, environment.Dev, cfg.DevPublicBaseURL), cfg),
+		newServer(cfg.ProdHTTPAddr, httptransport.NewPublicRouter(deps, environment.Prod, cfg.ProdPublicBaseURL), cfg),
 	}
 	errCh := make(chan error, len(servers))
 	for _, server := range servers {

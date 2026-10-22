@@ -8,16 +8,16 @@ import (
 	"fmt"
 	"strings"
 	"time"
+	"websiteengine/pkg/principal"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgconn"
 
-	"websiteengine/features/auth"
 	"websiteengine/features/features"
 	"websiteengine/pkg/environment"
-	"websiteengine/internal/platform/validate"
+	"websiteengine/pkg/platform/validate"
 	"websiteengine/pkg/publication"
-	"websiteengine/presentation/http/response"
+	"websiteengine/pkg/response"
 )
 
 type ValidationError struct {
@@ -85,7 +85,7 @@ func (s *Service) Versions(ctx context.Context, id uuid.UUID, limit int) ([]Vers
 }
 
 // Create inserts a first draft version. The entry is not public until publish.
-func (s *Service) Create(ctx context.Context, actor auth.Principal, featureID uuid.UUID, data json.RawMessage) (Detail, error) {
+func (s *Service) Create(ctx context.Context, actor principal.Principal, featureID uuid.UUID, data json.RawMessage) (Detail, error) {
 	if err := validateDataObject(data); err != nil {
 		return Detail{}, err
 	}
@@ -136,7 +136,7 @@ func (s *Service) Create(ctx context.Context, actor auth.Principal, featureID uu
 	return s.Get(ctx, entryID)
 }
 
-func (s *Service) SaveDraft(ctx context.Context, actor auth.Principal, entryID uuid.UUID, expectedRevision int64, data json.RawMessage) (Detail, error) {
+func (s *Service) SaveDraft(ctx context.Context, actor principal.Principal, entryID uuid.UUID, expectedRevision int64, data json.RawMessage) (Detail, error) {
 	if expectedRevision < 1 {
 		return Detail{}, &ValidationError{Message: "revision обязателен"}
 	}
@@ -205,7 +205,7 @@ func (s *Service) SaveDraft(ctx context.Context, actor auth.Principal, entryID u
 }
 
 // Publish creates an immutable version from the draft and publishes it to dev.
-func (s *Service) Publish(ctx context.Context, actor auth.Principal, entryID uuid.UUID, expectedRevision int64) (Detail, error) {
+func (s *Service) Publish(ctx context.Context, actor principal.Principal, entryID uuid.UUID, expectedRevision int64) (Detail, error) {
 	if expectedRevision < 1 {
 		return Detail{}, &ValidationError{Message: "revision обязателен"}
 	}
@@ -274,7 +274,7 @@ func (s *Service) Publish(ctx context.Context, actor auth.Principal, entryID uui
 }
 
 // Promote switches the prod pointer to the current dev version.
-func (s *Service) Promote(ctx context.Context, actor auth.Principal, entryID uuid.UUID, expectedRevision int64) (Detail, error) {
+func (s *Service) Promote(ctx context.Context, actor principal.Principal, entryID uuid.UUID, expectedRevision int64) (Detail, error) {
 	if expectedRevision < 1 {
 		return Detail{}, &ValidationError{Message: "revision обязателен"}
 	}
@@ -337,7 +337,7 @@ func (s *Service) Promote(ctx context.Context, actor auth.Principal, entryID uui
 }
 
 // Rollback switches an environment pointer to an older published version.
-func (s *Service) Rollback(ctx context.Context, actor auth.Principal, entryID uuid.UUID, versionNumber int, env environment.Environment) (Detail, error) {
+func (s *Service) Rollback(ctx context.Context, actor principal.Principal, entryID uuid.UUID, versionNumber int, env environment.Environment) (Detail, error) {
 	if versionNumber < 1 {
 		return Detail{}, &ValidationError{Message: "version должен быть положительным"}
 	}
@@ -399,7 +399,7 @@ func (s *Service) Rollback(ctx context.Context, actor auth.Principal, entryID uu
 
 // Unpublish removes a version from one environment while keeping the draft and
 // the other environment untouched.
-func (s *Service) Unpublish(ctx context.Context, actor auth.Principal, entryID uuid.UUID, env environment.Environment) (Detail, error) {
+func (s *Service) Unpublish(ctx context.Context, actor principal.Principal, entryID uuid.UUID, env environment.Environment) (Detail, error) {
 	if !env.Valid() {
 		return Detail{}, &ValidationError{Message: "environment должен быть dev или prod"}
 	}

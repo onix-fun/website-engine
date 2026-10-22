@@ -4,16 +4,17 @@ package overview
 import (
 	"log/slog"
 	"net/http"
+	"websiteengine/features/overview"
 
-	"websiteengine/presentation/http/response"
+	"websiteengine/pkg/response"
 )
 
 type Handler struct {
-	repo *Repository
+	repo *overview.Repository
 	log  *slog.Logger
 }
 
-func NewHandler(repo *Repository, log *slog.Logger) *Handler {
+func NewHandler(repo *overview.Repository, log *slog.Logger) *Handler {
 	return &Handler{repo: repo, log: log}
 }
 

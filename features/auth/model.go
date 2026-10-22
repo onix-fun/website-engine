@@ -2,6 +2,7 @@ package auth
 
 import (
 	"context"
+
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
@@ -9,14 +10,17 @@ import (
 	"errors"
 	"strings"
 	"time"
+	"websiteengine/pkg/principal"
 
 	"github.com/google/uuid"
 )
 
 const (
-	RoleAdmin     = "admin"
-	RoleModerator = "moderator"
-	RoleUser      = "user"
+	RoleAdmin     principal.Role = principal.RoleAdmin
+	RoleModerator principal.Role = "moderator"
+	RoleStaff     principal.Role = principal.RoleStaff
+	RoleUser      principal.Role = principal.RoleUser
+	RolePublic    principal.Role = principal.RolePublic
 
 	tokenPrefix = "ct_live_"
 )
@@ -29,24 +33,17 @@ var (
 	ErrValidation   = errors.New("validation")
 )
 
-type Principal struct {
-	TokenID   uuid.UUID  `json:"id"`
-	Name      string     `json:"name"`
-	Role      string     `json:"role"`
-	CreatedBy *uuid.UUID `json:"created_by,omitempty"`
-	ExpiresAt *time.Time `json:"expires_at"`
-	CreatedAt time.Time  `json:"created_at"`
-}
+type Principal = principal.Principal
 
 type Token struct {
-	ID         uuid.UUID  `json:"id"`
-	Name       string     `json:"name"`
-	Role       string     `json:"role"`
-	CreatedBy  *uuid.UUID `json:"created_by"`
-	ExpiresAt  *time.Time `json:"expires_at"`
-	RevokedAt  *time.Time `json:"revoked_at"`
-	LastUsedAt *time.Time `json:"last_used_at"`
-	CreatedAt  time.Time  `json:"created_at"`
+	ID         uuid.UUID      `json:"id"`
+	Name       string         `json:"name"`
+	Role       principal.Role `json:"role"`
+	CreatedBy  *uuid.UUID     `json:"created_by"`
+	ExpiresAt  *time.Time     `json:"expires_at"`
+	RevokedAt  *time.Time     `json:"revoked_at"`
+	LastUsedAt *time.Time     `json:"last_used_at"`
+	CreatedAt  time.Time      `json:"created_at"`
 }
 
 type NewToken struct {
@@ -72,14 +69,49 @@ func HashHex(secret string) string {
 	return hex.EncodeToString(HashSecret(secret))
 }
 
-func IsAdmin(role string) bool { return role == RoleAdmin }
-
-func IsStaff(role string) bool {
-	return role == RoleAdmin || role == RoleModerator
+func IsAdmin(role any) bool {
+	var r principal.Role
+	switch v := role.(type) {
+	case string:
+		r = principal.Role(v)
+	case principal.Role:
+		r = v
+	case Principal:
+		r = v.Role
+	default:
+		return false
+	}
+	return r == principal.RoleAdmin
 }
 
-func ValidRole(role string) bool {
-	return role == RoleAdmin || role == RoleModerator || role == RoleUser
+func IsStaff(role any) bool {
+	var r principal.Role
+	switch v := role.(type) {
+	case string:
+		r = principal.Role(v)
+	case principal.Role:
+		r = v
+	case Principal:
+		r = v.Role
+	default:
+		return false
+	}
+	return r == principal.RoleAdmin || r == RoleModerator || r == principal.RoleStaff
+}
+
+func ValidRole(role any) bool {
+	var r principal.Role
+	switch v := role.(type) {
+	case string:
+		r = principal.Role(v)
+	case principal.Role:
+		r = v
+	case Principal:
+		r = v.Role
+	default:
+		return false
+	}
+	return r == principal.RoleAdmin || r == RoleModerator || r == principal.RoleUser || r == principal.RoleStaff
 }
 
 func CleanName(name string) (string, bool) {
@@ -90,13 +122,10 @@ func CleanName(name string) (string, bool) {
 	return name, true
 }
 
-type principalContextKey struct{}
-
 func WithPrincipal(ctx context.Context, p Principal) context.Context {
-	return context.WithValue(ctx, principalContextKey{}, p)
+	return principal.WithPrincipal(ctx, p)
 }
 
 func PrincipalFromContext(ctx context.Context) (Principal, bool) {
-	p, ok := ctx.Value(principalContextKey{}).(Principal)
-	return p, ok
+	return principal.FromContext(ctx)
 }

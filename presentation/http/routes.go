@@ -8,18 +8,18 @@ import (
 	"time"
 
 	"websiteengine/features/auth"
-	"websiteengine/features/content"
-	"websiteengine/features/features"
-	"websiteengine/features/forms"
-	"websiteengine/features/media"
-	"websiteengine/features/overview"
-	"websiteengine/features/releases"
-	"websiteengine/features/settings"
 	"websiteengine/pkg/environment"
+	"websiteengine/pkg/response"
 	"websiteengine/pkg/site"
 	"websiteengine/pkg/static"
+	hauth "websiteengine/presentation/http/handlers/auth"
+	hcontent "websiteengine/presentation/http/handlers/content"
+	hfeatures "websiteengine/presentation/http/handlers/features"
+	hforms "websiteengine/presentation/http/handlers/forms"
+	hmedia "websiteengine/presentation/http/handlers/media"
+	hoverview "websiteengine/presentation/http/handlers/overview"
+	hreleases "websiteengine/presentation/http/handlers/releases"
 	"websiteengine/presentation/http/middleware"
-	"websiteengine/presentation/http/response"
 )
 
 type Dependencies struct {
@@ -28,14 +28,13 @@ type Dependencies struct {
 	}
 	Log               *slog.Logger
 	AuthService       *auth.Service
-	Auth              *auth.Handler
-	Features          *features.Handler
-	Content           *content.Handler
-	Forms             *forms.Handler
-	Media             *media.Handler
-	Overview          *overview.Handler
-	Settings          *settings.Handler
-	Releases          *releases.Handler
+	Auth              *hauth.Handler
+	Features          *hfeatures.Handler
+	Content           *hcontent.Handler
+	Forms             *hforms.Handler
+	Media             *hmedia.Handler
+	Overview          *hoverview.Handler
+	Releases          *hreleases.Handler
 	Site              *site.Manager
 	DevPublicBaseURL  string
 	ProdPublicBaseURL string
@@ -98,14 +97,9 @@ func NewRouter(d Deps) http.Handler {
 	// Operational summary for the admin dashboard.
 	mux.Handle("GET /api/v1/admin/overview", user(d.Overview.Get))
 
-	// Sanitized runtime configuration for the admin settings section.
-	if d.Settings != nil {
-		mux.Handle("GET /api/v1/admin/settings", staff(d.Settings.Get))
-	}
-
 	// Feature metadata and schema publication.
 	mux.Handle("GET /api/v1/admin/features", user(d.Features.List))
-	mux.Handle("POST /api/v1/admin/features", jsonUser(d.Features.Create))
+	mux.Handle("POST /api/v1/admin/features", jsonStaff(d.Features.Create))
 	mux.Handle("GET /api/v1/admin/features/{id}", user(d.Features.Get))
 	mux.Handle("PATCH /api/v1/admin/features/{id}", jsonStaff(d.Features.Update))
 	mux.Handle("POST /api/v1/admin/features/{id}/archive", staff(d.Features.Archive))
@@ -213,8 +207,8 @@ func NewRouter(d Deps) http.Handler {
 	return handler
 }
 
-// NewPublicRouter serves a single site environment. The caller must wrap it
-// with middleware.WithEnvironment so content and CORS resolve to that listener.
+// NewPublicRouter serves a single site environment. The handler tags itself
+// with that environment, so content and CORS resolve to the right listener.
 func NewPublicRouter(d Deps, env environment.Environment, baseURL string) http.Handler {
 	if d.FormRateWindow <= 0 {
 		d.FormRateWindow = time.Minute
@@ -271,7 +265,9 @@ func NewPublicRouter(d Deps, env environment.Environment, baseURL string) http.H
 	handler = middleware.SecurityHeaders(handler)
 	handler = middleware.Recover(d.Log)(handler)
 	handler = middleware.Logger(d.Log)(handler)
-	return handler
+	// WithEnvironment stays outermost, mirroring the previous wiring where
+	// each public server wrapped the router itself.
+	return middleware.WithEnvironment(env)(handler)
 }
 
 // Deps is an alias used to keep composite literals readable in tests.

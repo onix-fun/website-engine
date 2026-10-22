@@ -51,19 +51,29 @@ docker compose up --build
 
 ## Архитектура
 
+Проект организован по feature-based архитектуре: бизнес-логика каждой области
+живёт в `features/<feature>`, инфраструктура — в `pkg`, внешний интерфейс — в
+`presentation`. Правила зависимостей: `features` владеют своими данными и
+бизнес-логикой; другие фичи используют только их публичный API; `pkg` не зависит
+от `features` и `presentation`; `presentation` не обращается к БД напрямую.
+
 ```text
-cmd/server                 сборка приложения, конфигурация, graceful shutdown
-internal/auth              токены, роли, bootstrap
-internal/features          Feature, версии JSON Schema, публикация/rollback
-internal/content           контентные записи, версии, публичное чтение
-internal/forms             отправки форм, фильтры, CSV
-internal/media             метаданные S3, обработка изображений, 302
-internal/storage/s3        AWS SDK v2, S3-совместимое хранилище
-internal/database          pgxpool и мигратор
-internal/platform/validate JSON Schema и публичная проекция данных
-internal/transport/http    маршруты, middleware, JSON-ответы
-internal/transport/static  встроенная сборка React-админки
-migrations                 PostgreSQL-миграции
+cmd/api                    сборка приложения, конфигурация, graceful shutdown
+features/auth              токены, роли, bootstrap
+features/features          Feature, версии JSON Schema, публикация/rollback
+features/content           контентные записи, версии, публичное чтение
+features/forms             отправки форм, фильтры, CSV
+features/media             метаданные S3, обработка изображений, 302
+features/overview          сводка для дашборда
+features/releases          релизы, источники, окружения, провайдеры
+features/settings          настройки админки и публичного API
+pkg/config                 загрузка и проверка конфигурации
+pkg/postgres               pgxpool и Atlas-мигратор
+pkg/storage/s3             AWS SDK v2, S3-совместимое хранилище
+pkg/platform/validate      JSON Schema и публичная проекция данных
+presentation/http          маршруты, middleware, JSON-ответы
+pkg/static                 встроенная сборка React-админки
+migrations                 PostgreSQL-миграции (генерируются из pkg/models)
 frontend                   React + TypeScript + Vite
 docs/API.md                контракт API
 ```
@@ -141,7 +151,7 @@ export BOOTSTRAP_ADMIN_TOKEN='dev-admin-token-change-me-please'
 export S3_ENDPOINT='http://localhost:9000'
 export S3_PUBLIC_BASE_URL='http://localhost:9000'
 export S3_ENSURE_BUCKET=true
-go run ./cmd/server
+go run ./cmd/api
 ```
 
 Сервер сам применит миграции. Админка будет доступна после сборки frontend (см. ниже).
@@ -158,10 +168,10 @@ Production-сборка встраивается в Go-бинарь:
 
 ```bash
 pnpm --dir frontend build
-go run ./cmd/server
+go run ./cmd/api
 ```
 
-Сборка пишется в `internal/transport/static/dist/` и встраивается через `go:embed`.
+Сборка пишется в `pkg/static/dist/` и встраивается через `go:embed`.
 
 ### Тесты
 
@@ -178,7 +188,7 @@ docker run -d --name engine-test-db \
   -p 55432:5432 postgres:16-alpine
 
 TEST_DATABASE_URL='postgres://engine:engine@localhost:55432/engine_test?sslmode=disable' \
-  go test -v ./internal/integration
+  go test -v ./cmd/integration
 ```
 
 Тесты создают схему миграциями, очищают таблицы, используют in-memory fake S3 и проверяют

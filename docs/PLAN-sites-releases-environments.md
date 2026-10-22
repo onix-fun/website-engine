@@ -102,7 +102,7 @@ draft ──publish──> dev ──promote──> prod
 
 ### 2. Backend: среды и контент
 
-- [x] Добавить пакет `internal/environment`
+- [x] Добавить пакет `pkg/environment`
 - [x] Добавить resolver среды по listener/host/port
 - [x] Пробросить среду через context middleware
 - [x] Перестроить `features.Repository` под `dev`/`prod`
@@ -132,13 +132,13 @@ draft ──publish──> dev ──promote──> prod
 - [x] `moderator`: схемы, feature-настройки, архив, prod-контент, dev-rollback
 - [x] `moderator`: импорт релизов и активация dev
 - [x] `admin`: полный доступ, prod-релизы и prod-rollback
-- [x] Обновить матрицу в `internal/settings/handler.go`
+- [x] Обновить матрицу в `features/settings/handler.go`
 - [x] Закрыть админские маршруты на публичных listener'ах
 
 ### 4. Backend: релизы и артефакты
 
-- [x] Добавить пакет `internal/secrets` (AES-GCM)
-- [x] Добавить пакет `internal/releases`
+- [x] Добавить пакет `pkg/secrets` (AES-GCM)
+- [x] Добавить пакет `features/releases`
 - [x] Интерфейс Git-провайдера
 - [x] GitHub provider: список релизов и скачивание asset
 - [x] Ручная загрузка zip

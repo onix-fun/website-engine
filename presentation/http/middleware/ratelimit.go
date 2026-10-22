@@ -6,7 +6,7 @@ import (
 	"sync"
 	"time"
 
-	"websiteengine/presentation/http/response"
+	"websiteengine/pkg/response"
 )
 
 type rateEntry struct {

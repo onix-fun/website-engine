@@ -1,6 +1,9 @@
 package auth
 
-import "websiteengine/pkg/environment"
+import (
+	"websiteengine/pkg/environment"
+	"websiteengine/pkg/principal"
+)
 
 // Capabilities are the server-side role checks shared by HTTP handlers. They
 // intentionally mirror the role matrix documented in README.md.
@@ -45,5 +48,6 @@ func CanActivateRelease(role string, env environment.Environment) bool {
 }
 
 func CanCreateFeature(role string) bool {
-	return role == RoleAdmin || role == RoleModerator
+	r := principal.Role(role)
+	return r == principal.RoleAdmin || r == RoleModerator || r == principal.RoleStaff || r == principal.Role("admin") || r == principal.Role("staff")
 }
