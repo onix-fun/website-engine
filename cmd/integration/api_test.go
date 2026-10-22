@@ -27,8 +27,13 @@ import (
 	"websiteengine/features/forms"
 	"websiteengine/features/media"
 	"websiteengine/features/overview"
+	"websiteengine/features/releases"
+	"websiteengine/features/settings"
 	"websiteengine/migrations"
+	"websiteengine/pkg/environment"
 	"websiteengine/pkg/postgres"
+	"websiteengine/pkg/secrets"
+	"websiteengine/pkg/site"
 	"websiteengine/pkg/storage"
 	httptransport "websiteengine/presentation/http"
 	hauth "websiteengine/presentation/http/handlers/auth"
@@ -37,6 +42,9 @@ import (
 	hforms "websiteengine/presentation/http/handlers/forms"
 	hmedia "websiteengine/presentation/http/handlers/media"
 	hoverview "websiteengine/presentation/http/handlers/overview"
+	hpublication "websiteengine/presentation/http/handlers/publication"
+	hreleases "websiteengine/presentation/http/handlers/releases"
+	hsettings "websiteengine/presentation/http/handlers/settings"
 )
 
 const testAdminToken = "test-admin-token-at-least-24-characters"
@@ -88,9 +96,15 @@ type testEnv struct {
 	t          *testing.T
 	pool       *pgxpool.Pool
 	server     *httptest.Server
+	devServer  *httptest.Server
+	prodServer *httptest.Server
 	adminToken string
 	store      *fakeStore
+	releases   *releases.Service
 }
+
+const testDevPublicURL = "https://dev.example.test"
+const testProdPublicURL = "https://example.test"
 
 func newTestEnv(t *testing.T) *testEnv {
 	t.Helper()
@@ -108,8 +122,14 @@ func newTestEnv(t *testing.T) *testEnv {
 		t.Fatalf("migrate: %v", err)
 	}
 	if _, err := pool.Exec(ctx, `TRUNCATE media_objects, form_submissions, feature_entry_versions,
-		feature_entries, feature_versions, features, access_tokens RESTART IDENTITY CASCADE`); err != nil {
+		feature_entries, feature_versions, features, access_tokens, content_publication_events,
+		release_events, site_releases, site_environments, release_sources, site_settings
+		RESTART IDENTITY CASCADE`); err != nil {
 		t.Fatalf("truncate: %v", err)
+	}
+	// The CASCADE truncate drops the seeded environment rows.
+	if err := postgres.SeedDefaults(ctx, pool); err != nil {
+		t.Fatalf("seed defaults: %v", err)
 	}
 
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
@@ -128,7 +148,23 @@ func newTestEnv(t *testing.T) *testEnv {
 	mediaRepo := media.NewRepository(pool)
 	mediaService := media.NewService(mediaRepo, store, 20<<20)
 
-	router := httptransport.NewRouter(httptransport.Dependencies{
+	releaseRepo := releases.NewRepository(pool)
+	box, err := secrets.New(strings.Repeat("k", 32))
+	if err != nil {
+		t.Fatalf("release master key: %v", err)
+	}
+	releaseService := releases.NewService(releaseRepo, store, box, 8<<20)
+	releaseHandler := hreleases.NewHandler(releaseService, log, 8<<20)
+	settingsService := settings.NewService(settings.Config{
+		MaxJSONBytes:         1 << 20,
+		MaxUploadBytes:       20 << 20,
+		AdminPageSize:        50,
+		PublicPageSize:       20,
+		AcceptedContentTypes: media.AcceptedContentTypes(),
+		ImageVariants:        media.ImageVariantNames(),
+	})
+
+	deps := httptransport.Dependencies{
 		Log: log, AuthService: authService,
 		Auth:              hauth.NewHandler(authService, log, 1<<20),
 		Features:          hfeatures.NewHandler(featureService, log, 1<<20),
@@ -136,15 +172,27 @@ func newTestEnv(t *testing.T) *testEnv {
 		Forms:             hforms.NewHandler(formsService, log, 1<<20),
 		Media:             hmedia.NewHandler(mediaService, log, 20<<20),
 		Overview:          hoverview.NewHandler(overview.NewRepository(pool), log),
+		Releases:          releaseHandler,
+		PublicationEvents: hpublication.NewHandler(pool, log),
+		Settings:          hsettings.NewHandler(settingsService),
+		Site:              site.NewManager(site.NewRepository(pool), store, t.TempDir()),
+		CorsResolver:      releaseService.Cors(),
 		Health:            func(context.Context) error { return nil },
 		MaxJSONBytes:      1 << 20,
 		FormRateLimit:     10000,
 		FormRateWindow:    time.Minute,
 		PublicCORSOrigins: []string{"https://site.example"},
-	})
-	server := httptest.NewServer(router)
+		ProdPublicBaseURL: testProdPublicURL,
+	}
+
+	server := httptest.NewServer(httptransport.NewRouter(deps))
 	t.Cleanup(server.Close)
-	return &testEnv{t: t, pool: pool, server: server, adminToken: testAdminToken, store: store}
+	devServer := httptest.NewServer(httptransport.NewPublicRouter(deps, environment.Dev, testDevPublicURL))
+	t.Cleanup(devServer.Close)
+	prodServer := httptest.NewServer(httptransport.NewPublicRouter(deps, environment.Prod, testProdPublicURL))
+	t.Cleanup(prodServer.Close)
+	return &testEnv{t: t, pool: pool, server: server, devServer: devServer, prodServer: prodServer,
+		adminToken: testAdminToken, store: store, releases: releaseService}
 }
 
 func (e *testEnv) request(method, path, token string, body any) (int, map[string]any, http.Header) {

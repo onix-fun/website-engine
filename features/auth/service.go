@@ -85,7 +85,7 @@ func (s *Service) Create(ctx context.Context, actor Principal, name, role string
 	if !ValidRole(role) {
 		return NewToken{}, ErrValidation
 	}
-	if actor.Role == principal.Role(RoleModerator) || actor.Role == principal.Role("moderator") && principal.Role(role) != principal.RoleUser {
+	if actor.Role == RoleModerator && principal.Role(role) != principal.RoleUser {
 		return NewToken{}, ErrForbidden
 	}
 	if expiresAt != nil {
@@ -112,7 +112,7 @@ func (s *Service) List(ctx context.Context, actor Principal) ([]Token, error) {
 		return nil, ErrForbidden
 	}
 	var creator *uuid.UUID
-	if actor.Role == principal.Role(RoleModerator) || actor.Role == principal.Role("moderator") {
+	if actor.Role == RoleModerator {
 		id := actor.TokenID
 		creator = &id
 	}
@@ -127,7 +127,7 @@ func (s *Service) Get(ctx context.Context, actor Principal, id uuid.UUID) (Token
 	if err != nil {
 		return Token{}, err
 	}
-	if actor.Role == principal.Role(RoleModerator) || actor.Role == principal.Role("moderator") && (token.CreatedBy == nil || *token.CreatedBy != actor.TokenID) {
+	if actor.Role == RoleModerator && (token.CreatedBy == nil || *token.CreatedBy != actor.TokenID) {
 		return Token{}, ErrNotFound
 	}
 	return token, nil
@@ -141,7 +141,7 @@ func (s *Service) Revoke(ctx context.Context, actor Principal, id uuid.UUID) err
 	if err != nil {
 		return err
 	}
-	if actor.Role == principal.Role(RoleModerator) || actor.Role == principal.Role("moderator") && (token.CreatedBy == nil || *token.CreatedBy != actor.TokenID) {
+	if actor.Role == RoleModerator && (token.CreatedBy == nil || *token.CreatedBy != actor.TokenID) {
 		return ErrNotFound
 	}
 	return s.repo.Revoke(ctx, id)
