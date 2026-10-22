@@ -14,6 +14,7 @@ import {
   Sparkles,
 } from "lucide-react";
 import { api, ApiError } from "@/api";
+import { useAuth } from "@/app/auth";
 import type { OverviewActivity, OverviewCounts } from "@/types";
 import { queryKeys } from "@/lib/query-keys";
 import { formatDateTime, pluralRu } from "@/lib/format";
@@ -29,6 +30,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/misc";
 import { cn } from "@/lib/utils";
+import { SiteStatusCard } from "@/pages/dashboard/SiteStatusCard";
 
 const statDefinitions: Array<{
   key: keyof OverviewCounts;
@@ -95,6 +97,7 @@ function OverviewSkeleton() {
 
 export default function DashboardPage() {
   useDocumentTitle("Главная");
+  const auth = useAuth();
   const overview = useQuery({
     queryKey: queryKeys.overview,
     queryFn: ({ signal }) => api.overview.get(signal),
@@ -193,6 +196,7 @@ export default function DashboardPage() {
                         ["Features", "Схемы и контент", "/features"],
                         ["Заявки", "Обработка форм", "/submissions"],
                         ["Медиа", "Загрузки и медиатека", "/media"],
+                        ["Сайт", "Релизы и среды", "/releases"],
                         ["Токены", "Доступы и роли", "/access/tokens"],
                       ].map(([title, text, to]) => (
                         <Link
@@ -246,6 +250,8 @@ export default function DashboardPage() {
               );
             })}
           </section>
+
+          {auth.principal && auth.principal.role !== "user" && <SiteStatusCard />}
 
           <div className="grid gap-4 xl:grid-cols-[1.25fr_1fr]">
             <section className="rounded-lg border border-border bg-card" aria-labelledby="attention-title">

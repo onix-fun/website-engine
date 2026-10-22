@@ -335,7 +335,7 @@ func (p *Provider) ForSource(src Source) (releaseprovider.Provider, error) {
 	}
 }
 
-func (s *Service) SyncFromSource(ctx context.Context, actor principal.Principal, src Source, assetURL string) (Release, error) {
+func (s *Service) SyncFromSource(ctx context.Context, actor principal.Principal, src Source, assetURL, version, tag string) (Release, error) {
 	p, err := s.Provider().ForSource(src)
 	if err != nil {
 		return Release{}, err
@@ -376,6 +376,19 @@ func (s *Service) SyncFromSource(ctx context.Context, actor principal.Principal,
 	}
 	id := uuid.New()
 	objectKey := filepath.ToSlash(filepath.Join("releases", id.String()+".zip"))
+	version = strings.TrimSpace(version)
+	tag = strings.TrimSpace(tag)
+	if version == "" {
+		// The manifest is only known after the download, so a caller that
+		// did not pass an explicit version falls back to the hash prefix.
+		version = manifest.SHA256[:12]
+	}
+	if !versionPattern.MatchString(version) {
+		return Release{}, errors.New("version must be 1-200 URL-safe characters")
+	}
+	if tag != "" && !versionPattern.MatchString(tag) {
+		return Release{}, errors.New("tag must be 1-200 URL-safe characters")
+	}
 	f, err := os.Open(tmpName)
 	if err != nil {
 		return Release{}, err
@@ -390,9 +403,12 @@ func (s *Service) SyncFromSource(ctx context.Context, actor principal.Principal,
 		"files": len(manifest.Files), "sha256": manifest.SHA256, "size": manifest.Size,
 	})
 	rel := Release{
-		ID: id, Version: manifest.SHA256[:12], SourceID: &src.ID, ObjectKey: objectKey,
+		ID: id, Version: version, SourceID: &src.ID, ObjectKey: objectKey,
 		SHA256: manifest.SHA256, ArtifactSize: manifest.Size, Manifest: manifestJSON,
 		ImportedBy: &actor.TokenID,
+	}
+	if tag != "" {
+		rel.Tag = &tag
 	}
 	if err := s.repo.InsertRelease(ctx, rel); err != nil {
 		_ = s.store.Delete(context.Background(), objectKey)

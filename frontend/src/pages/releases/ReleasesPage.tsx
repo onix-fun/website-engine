@@ -1,6 +1,7 @@
 import { useMemo, useRef, useState } from "react";
+import { Link } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Upload } from "lucide-react";
+import { RotateCcw, Settings2, Upload } from "lucide-react";
 import { toast } from "sonner";
 import { api, isApiError, uploadRelease } from "@/api";
 import { useAuth } from "@/app/auth";
@@ -11,6 +12,7 @@ import { Input } from "@/components/ui/input";
 import { ErrorState, LoadingPage, useDocumentTitle } from "@/components/common/page";
 import { formatDateTime } from "@/lib/format";
 import type { Environment } from "@/types";
+import { SourcesCard } from "@/pages/releases/SourcesCard";
 
 export default function ReleasesPage() {
   useDocumentTitle("Сайт и релизы");
@@ -52,6 +54,28 @@ export default function ReleasesPage() {
     }
     return map;
   }, [environments.data]);
+
+  // The release list is newest-first; the rollback target for an
+  // environment is the release right after the currently active one.
+  const previous = useMemo(() => {
+    const map = new Map<string, string | null>();
+    for (const [envKey, activeId] of active) {
+      const index = releases.data?.items.findIndex((item) => item.id === activeId) ?? -1;
+      map.set(envKey, index >= 0 ? (releases.data?.items[index + 1]?.id ?? null) : null);
+    }
+    return map;
+  }, [active, releases.data]);
+
+  const rollback = useMutation({
+    mutationFn: ({ id, environment }: { id: string; environment: Environment }) =>
+      api.releases.rollback(id, environment),
+    onSuccess: (_, input) => {
+      toast.success(`Откат в ${input.environment} выполнен`);
+      void queryClient.invalidateQueries({ queryKey: ["site-environments"] });
+      void queryClient.invalidateQueries({ queryKey: ["releases"] });
+    },
+    onError: (error) => toast.error(isApiError(error) ? error.message : "Не удалось откатить релиз"),
+  });
 
   const upload = async () => {
     const file = fileRef.current?.files?.[0];
@@ -106,17 +130,54 @@ export default function ReleasesPage() {
               </CardHeader>
               <CardContent className="text-sm">
                 {rel ? (
-                  <p>
-                    Активен <strong>v{rel.version}</strong> · {formatDateTime(rel.created_at)}
+                  <p className="flex flex-wrap items-center gap-2">
+                    <span>
+                      Активен <strong>v{rel.version}</strong> · {formatDateTime(rel.created_at)}
+                    </span>
+                    {canActivateProd && previous.get(env.key) && (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() =>
+                          rollback.mutate({
+                            id: previous.get(env.key) as string,
+                            environment: env.key,
+                          })
+                        }
+                        loading={
+                          rollback.isPending && rollback.variables?.environment === env.key
+                        }
+                      >
+                        <RotateCcw />
+                        Откатить
+                      </Button>
+                    )}
                   </p>
                 ) : (
                   <p className="text-muted-foreground">Активный релиз не выбран</p>
+                )}
+                {canActivateProd && (
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    asChild
+                    className="mt-2 px-0 text-muted-foreground"
+                  >
+                    <Link to={`/releases/environments/${env.key}`}>
+                      <Settings2 />
+                      Настроить среду
+                    </Link>
+                  </Button>
                 )}
               </CardContent>
             </Card>
           );
         })}
       </div>
+
+      {canImport && (
+        <SourcesCard canEdit={canActivateProd} />
+      )}
 
       {canImport && (
         <Card>

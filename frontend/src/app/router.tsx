@@ -27,6 +27,9 @@ const UsersPage = lazy(() => import("@/pages/access/UsersPage"));
 const RolesPage = lazy(() => import("@/pages/access/RolesPage"));
 const SettingsPage = lazy(() => import("@/pages/settings/SettingsPage"));
 const ReleasesPage = lazy(() => import("@/pages/releases/ReleasesPage"));
+const EnvironmentSettingsPage = lazy(
+  () => import("@/pages/releases/EnvironmentSettingsPage"),
+);
 const NotFoundPage = lazy(() => import("@/app/pages/NotFoundPage"));
 
 function RequireAuth() {
@@ -135,6 +138,13 @@ export const router = createBrowserRouter(
             }],
             },
             { path: "releases", element: <ReleasesPage /> },
+            {
+              element: <RequireStaff />,
+              children: [{
+                path: "releases/environments/:envKey",
+                element: <EnvironmentSettingsPage />,
+              }],
+            },
             {
               element: <RequireStaff />,
               children: [{ path: "settings", element: <SettingsPage /> }],

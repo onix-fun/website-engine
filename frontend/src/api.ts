@@ -8,6 +8,7 @@ import type {
   EntryListParams,
   EntryVersion,
   Environment,
+  EnvironmentPatch,
   Feature,
   FeatureDetail,
   FeatureDraftState,
@@ -19,9 +20,11 @@ import type {
   MediaListParams,
   MediaStatus,
   MediaUsage,
+  NewReleaseSourceInput,
   Overview,
   Principal,
   ReleaseSource,
+  RemoteRelease,
   Settings,
   SiteEnvironment,
   SiteRelease,
@@ -605,11 +608,38 @@ export const api = {
     environments(signal?: AbortSignal): Promise<{ items: SiteEnvironment[] }> {
       return request<{ items: SiteEnvironment[] }>(`${ADMIN_ROOT}/site/environments`, { signal });
     },
+    updateEnvironment(key: Environment, patch: EnvironmentPatch): Promise<SiteEnvironment> {
+      return request<SiteEnvironment>(`${ADMIN_ROOT}/site/environments/${encoded(key)}`, {
+        method: "PATCH",
+        body: patch,
+      });
+    },
   },
 
   releaseSources: {
     list(signal?: AbortSignal): Promise<{ items: ReleaseSource[] }> {
       return request<{ items: ReleaseSource[] }>(`${ADMIN_ROOT}/release-sources`, { signal });
+    },
+    create(input: NewReleaseSourceInput): Promise<ReleaseSource> {
+      return request<ReleaseSource>(`${ADMIN_ROOT}/release-sources`, {
+        method: "POST",
+        body: input,
+      });
+    },
+    remoteReleases(id: string, signal?: AbortSignal): Promise<{ items: RemoteRelease[] }> {
+      return request<{ items: RemoteRelease[] }>(
+        `${ADMIN_ROOT}/release-sources/${encoded(id)}/releases`,
+        { signal },
+      );
+    },
+    sync(
+      id: string,
+      body: { asset_url: string; version?: string; tag?: string },
+    ): Promise<SiteRelease> {
+      return request<SiteRelease>(`${ADMIN_ROOT}/release-sources/${encoded(id)}/sync`, {
+        method: "POST",
+        body,
+      });
     },
     remove(id: string): Promise<void> {
       return request<void>(`${ADMIN_ROOT}/release-sources/${encoded(id)}`, { method: "DELETE" });

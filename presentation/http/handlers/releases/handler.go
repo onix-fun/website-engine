@@ -256,6 +256,7 @@ func (h *Handler) SyncSource(w http.ResponseWriter, r *http.Request) {
 	}
 	var req struct {
 		AssetURL string `json:"asset_url"`
+		Version  string `json:"version"`
 		Tag      string `json:"tag"`
 	}
 	if err := response.DecodeJSON(w, r, &req, 4096); err != nil {
@@ -283,7 +284,7 @@ func (h *Handler) SyncSource(w http.ResponseWriter, r *http.Request) {
 		response.Error(w, r, http.StatusForbidden, "forbidden", "Недостаточно прав для импорта релиза")
 		return
 	}
-	rel, err := h.service.SyncFromSource(r.Context(), actor, *src, req.AssetURL)
+	rel, err := h.service.SyncFromSource(r.Context(), actor, *src, req.AssetURL, req.Version, req.Tag)
 	if err != nil {
 		h.writeError(w, r, err)
 		return

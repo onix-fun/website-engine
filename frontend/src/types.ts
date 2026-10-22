@@ -340,6 +340,35 @@ export interface SiteRelease {
   updated_at: string;
 }
 
+export interface EnvironmentPatch {
+  revision: number;
+  name?: string;
+  public_base_url?: string;
+  domains?: string[];
+  cors_origins?: string[];
+  tls_enabled?: boolean;
+}
+
+export interface RemoteReleaseAsset {
+  name: string;
+  browser_download_url: string;
+  size: number;
+}
+
+export interface RemoteRelease {
+  tag_name: string;
+  published_at?: string;
+  assets: RemoteReleaseAsset[];
+}
+
+export interface NewReleaseSourceInput {
+  provider: ReleaseSource["provider"];
+  repo_url: string;
+  asset_pattern: string;
+  token?: string;
+  enabled?: boolean;
+}
+
 export interface SiteEnvironment {
   key: Environment;
   name: string;
