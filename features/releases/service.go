@@ -29,14 +29,19 @@ type Service struct {
 	box      *secrets.Box
 	maxBytes int64
 	prov     *Provider
+	cors     *CorsSource
 }
 
 func NewService(repo *Repository, store storage.ObjectStore, box *secrets.Box, maxBytes int64) *Service {
 	if maxBytes <= 0 {
 		maxBytes = 512 << 20
 	}
-	return &Service{repo: repo, store: store, box: box, maxBytes: maxBytes, prov: NewProvider()}
+	cors := NewCorsSource(repo)
+	return &Service{repo: repo, store: store, box: box, maxBytes: maxBytes, prov: NewProvider(), cors: cors}
 }
+
+// Cors returns the environments-backed CORS resolver for public listeners.
+func (s *Service) Cors() *CorsSource { return s.cors }
 
 type ImportInput struct {
 	Version string

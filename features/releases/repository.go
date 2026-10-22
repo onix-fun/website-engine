@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/google/uuid"
@@ -175,6 +176,55 @@ func (r *Repository) Environments(ctx context.Context) ([]EnvironmentState, erro
 		out = append(out, e)
 	}
 	return out, rows.Err()
+}
+
+// UpdateEnvironment applies the editable environment settings when the
+// caller-supplied revision matches; otherwise it returns the current revision
+// so the caller can retry.
+func (r *Repository) UpdateEnvironment(ctx context.Context, env environment.Environment,
+	name, publicBaseURL string, domains, corsOrigins []string, tlsEnabled *bool, revision int64) (EnvironmentState, error) {
+	if domains == nil {
+		domains = []string{}
+	}
+	if corsOrigins == nil {
+		corsOrigins = []string{}
+	}
+	args := []any{name, publicBaseURL, domains, corsOrigins, revision}
+	sets := `name = $1,
+		       public_base_url = $2,
+		       domains = $3,
+		       cors_origins = $4,
+		       revision = revision + 1,
+		       updated_at = now()`
+	if tlsEnabled != nil {
+		args = append(args, *tlsEnabled)
+		sets += `, tls_enabled = $6`
+	}
+	args = append(args, env.String())
+	n := len(args)
+	tag, err := r.pool.Exec(ctx, `
+		UPDATE site_environments SET `+sets+` WHERE key = $`+fmt.Sprintf("%d", n)+` AND revision = $5`, args...)
+	if err != nil {
+		return EnvironmentState{}, err
+	}
+	if tag.RowsAffected() == 0 {
+		var current int64
+		if err := r.pool.QueryRow(ctx,
+			`SELECT revision FROM site_environments WHERE key = $1`, env.String()).Scan(&current); err != nil {
+			return EnvironmentState{}, err
+		}
+		return EnvironmentState{}, &envConflict{current: current}
+	}
+	states, err := r.Environments(ctx)
+	if err != nil {
+		return EnvironmentState{}, err
+	}
+	for _, st := range states {
+		if st.Key == env {
+			return st, nil
+		}
+	}
+	return EnvironmentState{}, fmt.Errorf("environment %s vanished after update", env)
 }
 
 func (r *Repository) ListSources(ctx context.Context) ([]Source, error) {

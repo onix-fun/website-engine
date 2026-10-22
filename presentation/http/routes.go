@@ -18,6 +18,7 @@ import (
 	hforms "websiteengine/presentation/http/handlers/forms"
 	hmedia "websiteengine/presentation/http/handlers/media"
 	hoverview "websiteengine/presentation/http/handlers/overview"
+	hpublication "websiteengine/presentation/http/handlers/publication"
 	hreleases "websiteengine/presentation/http/handlers/releases"
 	hsettings "websiteengine/presentation/http/handlers/settings"
 	"websiteengine/presentation/http/middleware"
@@ -36,8 +37,10 @@ type Dependencies struct {
 	Media             *hmedia.Handler
 	Overview          *hoverview.Handler
 	Releases          *hreleases.Handler
+	PublicationEvents *hpublication.Handler
 	Settings          *hsettings.Handler
 	Site              *site.Manager
+	CorsResolver      middleware.CorsResolver
 	DevPublicBaseURL  string
 	ProdPublicBaseURL string
 	Health            func(ctx context.Context) error
@@ -101,6 +104,11 @@ func NewRouter(d Deps) http.Handler {
 		mux.Handle("GET /api/v1/admin/settings", staff(http.HandlerFunc(d.Settings.Get)))
 	}
 
+	// Content publication audit feed.
+	if d.PublicationEvents != nil {
+		mux.Handle("GET /api/v1/admin/publication-events", staff(d.PublicationEvents.List))
+	}
+
 	// Operational summary for the admin dashboard.
 	mux.Handle("GET /api/v1/admin/overview", user(d.Overview.Get))
 
@@ -137,6 +145,7 @@ func NewRouter(d Deps) http.Handler {
 		mux.Handle("POST /api/v1/admin/releases/{id}/activate", jsonUser(d.Releases.Activate))
 		mux.Handle("POST /api/v1/admin/releases/{id}/rollback", jsonUser(d.Releases.Rollback))
 		mux.Handle("GET /api/v1/admin/site/environments", user(d.Releases.Environments))
+		mux.Handle("PATCH /api/v1/admin/site/environments/{key}", jsonLimit(admin(d.Releases.UpdateEnvironment)))
 		mux.Handle("GET /api/v1/admin/release-sources", staff(d.Releases.Sources))
 		mux.Handle("POST /api/v1/admin/release-sources", jsonStaff(d.Releases.CreateSource))
 		mux.Handle("DELETE /api/v1/admin/release-sources/{id}", staff(d.Releases.DeleteSource))
@@ -172,6 +181,9 @@ func NewRouter(d Deps) http.Handler {
 		}
 	}
 	cors := middleware.CORSFor(corsByEnv)
+	if d.CorsResolver != nil {
+		cors = middleware.DynamicCORS(d.CorsResolver, corsByEnv)
+	}
 	noop := http.HandlerFunc(func(http.ResponseWriter, *http.Request) {})
 	for _, pattern := range []string{
 		"OPTIONS /api/v1/content",
@@ -244,6 +256,9 @@ func NewPublicRouter(d Deps, env environment.Environment, baseURL string) http.H
 		}
 	}
 	cors := middleware.CORSFor(corsByEnv)
+	if d.CorsResolver != nil {
+		cors = middleware.DynamicCORS(d.CorsResolver, corsByEnv)
+	}
 	noop := http.HandlerFunc(func(http.ResponseWriter, *http.Request) {})
 	for _, pattern := range []string{
 		"OPTIONS /api/v1/content",

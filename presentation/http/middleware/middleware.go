@@ -234,6 +234,12 @@ func ClientIP(r *http.Request, trustProxy bool) string {
 // CORS exposes only explicitly configured public origins. It is applied to
 // public content and form-submission routes, never to admin routes.
 func CORS(origins []string) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return corsHandler(origins, next)
+	}
+}
+
+func corsHandler(origins []string, next http.Handler) http.Handler {
 	allowed := make(map[string]bool, len(origins))
 	allowAny := false
 	for _, origin := range origins {
@@ -243,38 +249,36 @@ func CORS(origins []string) func(http.Handler) http.Handler {
 		}
 		allowed[origin] = true
 	}
-	return func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			origin := r.Header.Get("Origin")
-			if origin == "" {
-				next.ServeHTTP(w, r)
-				return
-			}
-			w.Header().Add("Vary", "Origin")
-			if !allowAny && !allowed[origin] {
-				if r.Method == http.MethodOptions {
-					response.Error(w, r, http.StatusForbidden, "cors_origin_denied", "Origin не разрешён")
-					return
-				}
-				next.ServeHTTP(w, r)
-				return
-			}
-			if allowAny {
-				w.Header().Set("Access-Control-Allow-Origin", "*")
-			} else {
-				w.Header().Set("Access-Control-Allow-Origin", origin)
-			}
-			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-			w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Idempotency-Key")
-			w.Header().Set("Access-Control-Max-Age", "600")
-			w.Header().Set("Access-Control-Expose-Headers", "X-Request-ID, X-RateLimit-Limit, X-RateLimit-Remaining")
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		origin := r.Header.Get("Origin")
+		if origin == "" {
+			next.ServeHTTP(w, r)
+			return
+		}
+		w.Header().Add("Vary", "Origin")
+		if !allowAny && !allowed[origin] {
 			if r.Method == http.MethodOptions {
-				w.WriteHeader(http.StatusNoContent)
+				response.Error(w, r, http.StatusForbidden, "cors_origin_denied", "Origin не разрешён")
 				return
 			}
 			next.ServeHTTP(w, r)
-		})
-	}
+			return
+		}
+		if allowAny {
+			w.Header().Set("Access-Control-Allow-Origin", "*")
+		} else {
+			w.Header().Set("Access-Control-Allow-Origin", origin)
+		}
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Idempotency-Key")
+		w.Header().Set("Access-Control-Max-Age", "600")
+		w.Header().Set("Access-Control-Expose-Headers", "X-Request-ID, X-RateLimit-Limit, X-RateLimit-Remaining")
+		if r.Method == http.MethodOptions {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 // CORSFor selects the allow-list for the environment attached to the request.
@@ -296,6 +300,29 @@ func CORSFor(origins map[environment.Environment][]string) func(http.Handler) ht
 				return
 			}
 			fallback(next).ServeHTTP(w, r)
+		})
+	}
+}
+
+// CorsResolver serves the live CORS allow-list per environment. Public
+// listeners install one: it reads site_environments from the database, so
+// operators can change origins from the admin panel without a restart.
+type CorsResolver interface {
+	Origins(ctx context.Context, env environment.Environment) []string
+}
+
+// DynamicCORS combines the live resolver with the static bootstrap
+// allow-list: when the environment has no origins in the database, the
+// bootstrap list applies.
+func DynamicCORS(resolver CorsResolver, bootstrap map[environment.Environment][]string) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			env := environment.FromContext(r.Context())
+			origins := resolver.Origins(r.Context(), env)
+			if len(origins) == 0 {
+				origins = bootstrap[env]
+			}
+			corsHandler(origins, next).ServeHTTP(w, r)
 		})
 	}
 }

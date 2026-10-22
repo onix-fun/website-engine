@@ -33,6 +33,7 @@ import (
 	hforms "websiteengine/presentation/http/handlers/forms"
 	hmedia "websiteengine/presentation/http/handlers/media"
 	hoverview "websiteengine/presentation/http/handlers/overview"
+	hpublication "websiteengine/presentation/http/handlers/publication"
 	hreleases "websiteengine/presentation/http/handlers/releases"
 	hsettings "websiteengine/presentation/http/handlers/settings"
 )
@@ -150,6 +151,7 @@ func run(log *slog.Logger) error {
 		ImageVariants:           media.ImageVariantNames(),
 	})
 	settingsHandler := hsettings.NewHandler(settingsService)
+	publicationEventsHandler := hpublication.NewHandler(pool, log)
 
 	health := func(checkCtx context.Context) error {
 		if err := pool.Ping(checkCtx); err != nil {
@@ -175,19 +177,42 @@ func run(log *slog.Logger) error {
 	releaseHandler := hreleases.NewHandler(releaseService, log, cfg.MaxReleaseBytes)
 	siteManager := site.NewManager(site.NewRepository(pool), objectStore, cfg.ReleaseCacheDir)
 
+	// The database is the source of truth for public base URLs; the
+	// environment variables only bootstrap empty values. Change requires a
+	// restart, matching the listeners built once at startup.
+	devBaseURL, prodBaseURL := cfg.DevPublicBaseURL, cfg.ProdPublicBaseURL
+	if states, err := releaseService.Environments(ctx); err == nil {
+		for _, st := range states {
+			switch st.Key {
+			case environment.Dev:
+				if st.PublicBaseURL != "" {
+					devBaseURL = st.PublicBaseURL
+				}
+			case environment.Prod:
+				if st.PublicBaseURL != "" {
+					prodBaseURL = st.PublicBaseURL
+				}
+			}
+		}
+	} else {
+		log.Warn("site environment settings unavailable at startup", "error", err)
+	}
+
 	deps := httptransport.Dependencies{
 		Log: log, AuthService: authService, Auth: authHandler,
 		Features: featureHandler, Content: contentHandler, Forms: formsHandler, Media: mediaHandler,
 		Overview: overviewHandler, Health: health, MaxJSONBytes: cfg.MaxJSONBytes,
 		Releases: releaseHandler, Site: siteManager, Settings: settingsHandler,
-		FormRateLimit: cfg.FormRateLimit, FormRateWindow: cfg.FormRateWindow,
+		PublicationEvents: publicationEventsHandler,
+		CorsResolver:      releaseService.Cors(),
+		FormRateLimit:     cfg.FormRateLimit, FormRateWindow: cfg.FormRateWindow,
 		TrustProxy: cfg.TrustProxyHeaders, PublicCORSOrigins: cfg.PublicCORSOrigins, PublicCORSByEnv: cfg.PublicCORSByEnv,
 	}
 
 	servers := []*http.Server{
 		newServer(cfg.HTTPAddr, httptransport.NewRouter(deps), cfg),
-		newServer(cfg.DevHTTPAddr, httptransport.NewPublicRouter(deps, environment.Dev, cfg.DevPublicBaseURL), cfg),
-		newServer(cfg.ProdHTTPAddr, httptransport.NewPublicRouter(deps, environment.Prod, cfg.ProdPublicBaseURL), cfg),
+		newServer(cfg.DevHTTPAddr, httptransport.NewPublicRouter(deps, environment.Dev, devBaseURL), cfg),
+		newServer(cfg.ProdHTTPAddr, httptransport.NewPublicRouter(deps, environment.Prod, prodBaseURL), cfg),
 	}
 	errCh := make(chan error, len(servers))
 	for _, server := range servers {

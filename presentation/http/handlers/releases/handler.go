@@ -3,6 +3,7 @@ package releases
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -126,6 +127,53 @@ func (h *Handler) Environments(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	response.JSON(w, http.StatusOK, map[string]any{"items": items})
+}
+
+// UpdateEnvironment applies editable environment settings: name, public base
+// URL, domains, CORS origins and the TLS flag. Route middleware enforces the
+// admin role; the revision guards concurrent edits.
+func (h *Handler) UpdateEnvironment(w http.ResponseWriter, r *http.Request) {
+	key, err := environment.Parse(r.PathValue("key"))
+	if err != nil {
+		response.Error(w, r, http.StatusNotFound, "not_found", "Окружение не найдено")
+		return
+	}
+	var req struct {
+		Name          *string   `json:"name"`
+		PublicBaseURL *string   `json:"public_base_url"`
+		Domains       *[]string `json:"domains"`
+		CORSOrigins   *[]string `json:"cors_origins"`
+		TLSEnabled    *bool     `json:"tls_enabled"`
+		Revision      int64     `json:"revision"`
+	}
+	if err := response.DecodeJSON(w, r, &req, 8192); err != nil {
+		response.WriteDecodeError(w, r, err)
+		return
+	}
+	updated, err := h.service.UpdateEnvironment(r.Context(), key, releases.EnvironmentInput{
+		Name:          req.Name,
+		PublicBaseURL: req.PublicBaseURL,
+		Domains:       req.Domains,
+		CORSOrigins:   req.CORSOrigins,
+		TLSEnabled:    req.TLSEnabled,
+		Revision:      req.Revision,
+	})
+	if err != nil {
+		switch {
+		case errors.Is(err, releases.ErrRevisionConflict):
+			rev, _ := releases.CurrentRevision(err)
+			response.Error(w, r, http.StatusConflict, "revision_conflict",
+				fmt.Sprintf("Окружение изменено другим запросом (текущий revision %d)", rev))
+		case errors.Is(err, releases.ErrValidation):
+			response.Error(w, r, http.StatusBadRequest, "validation", err.Error())
+		case errors.Is(err, releases.ErrNotFound):
+			response.Error(w, r, http.StatusNotFound, "not_found", "Окружение не найдено")
+		default:
+			response.Error(w, r, http.StatusInternalServerError, "internal_error", "Не удалось обновить окружение")
+		}
+		return
+	}
+	response.JSON(w, http.StatusOK, updated)
 }
 
 func (h *Handler) Sources(w http.ResponseWriter, r *http.Request) {
