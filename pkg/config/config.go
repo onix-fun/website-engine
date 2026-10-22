@@ -44,6 +44,12 @@ type Config struct {
 	ReleaseCacheDir  string
 	ReleaseMasterKey string
 	MaxReleaseBytes  int64
+
+	// Release sources (git providers): extra exact hostnames that may be
+	// addressed as repository hosts (e.g. a self-hosted Gitea/GitLab), and
+	// whether plain http:// is accepted (local development only).
+	ProviderExtraHosts    []string
+	ProviderAllowInsecure bool
 }
 
 // TLSConfig controls the HTTPS listeners and the ACME client. When Enabled is
@@ -79,26 +85,28 @@ type S3Config struct {
 // Load reads and validates configuration from the process environment.
 func Load() (Config, error) {
 	cfg := Config{
-		HTTPAddr:            getenv("HTTP_ADDR", ":8080"),
-		DevHTTPAddr:         getenv("DEV_HTTP_ADDR", ":8081"),
-		ProdHTTPAddr:        getenv("PROD_HTTP_ADDR", ":8082"),
-		DevPublicBaseURL:    strings.TrimRight(getenv("DEV_PUBLIC_BASE_URL", "http://localhost:8081"), "/"),
-		ProdPublicBaseURL:   strings.TrimRight(getenv("PROD_PUBLIC_BASE_URL", "http://localhost:8082"), "/"),
-		ReleaseCacheDir:     getenv("RELEASE_CACHE_DIR", "./data/releases"),
-		ReleaseMasterKey:    strings.TrimSpace(os.Getenv("RELEASE_MASTER_KEY")),
-		MaxReleaseBytes:     getenvInt64("MAX_RELEASE_BYTES", 256<<20),
-		DatabaseURL:         strings.TrimSpace(os.Getenv("DATABASE_URL")),
-		MigrateOnStart:      getenvBool("MIGRATE_ON_START", true),
-		BootstrapAdminToken: strings.TrimSpace(os.Getenv("BOOTSTRAP_ADMIN_TOKEN")),
-		LogLevel:            strings.ToLower(getenv("LOG_LEVEL", "info")),
-		TrustProxyHeaders:   getenvBool("TRUST_PROXY_HEADERS", false),
-		PublicCORSOrigins:   splitCSV(os.Getenv("PUBLIC_CORS_ORIGINS")),
-		MaxJSONBytes:        getenvInt64("MAX_JSON_BYTES", 1<<20),
-		MaxUploadBytes:      getenvInt64("MAX_UPLOAD_BYTES", 20<<20),
-		FormRateLimit:       int(getenvInt64("FORM_RATE_LIMIT", 20)),
-		FormRateWindow:      time.Minute,
-		ReadHeaderTimeout:   10 * time.Second,
-		ShutdownTimeout:     20 * time.Second,
+		HTTPAddr:              getenv("HTTP_ADDR", ":8080"),
+		DevHTTPAddr:           getenv("DEV_HTTP_ADDR", ":8081"),
+		ProdHTTPAddr:          getenv("PROD_HTTP_ADDR", ":8082"),
+		DevPublicBaseURL:      strings.TrimRight(getenv("DEV_PUBLIC_BASE_URL", "http://localhost:8081"), "/"),
+		ProdPublicBaseURL:     strings.TrimRight(getenv("PROD_PUBLIC_BASE_URL", "http://localhost:8082"), "/"),
+		ReleaseCacheDir:       getenv("RELEASE_CACHE_DIR", "./data/releases"),
+		ReleaseMasterKey:      strings.TrimSpace(os.Getenv("RELEASE_MASTER_KEY")),
+		MaxReleaseBytes:       getenvInt64("MAX_RELEASE_BYTES", 256<<20),
+		ProviderExtraHosts:    splitCSV(os.Getenv("RELEASE_SOURCE_HOSTS")),
+		ProviderAllowInsecure: getenvBool("RELEASE_SOURCE_ALLOW_INSECURE", false),
+		DatabaseURL:           strings.TrimSpace(os.Getenv("DATABASE_URL")),
+		MigrateOnStart:        getenvBool("MIGRATE_ON_START", true),
+		BootstrapAdminToken:   strings.TrimSpace(os.Getenv("BOOTSTRAP_ADMIN_TOKEN")),
+		LogLevel:              strings.ToLower(getenv("LOG_LEVEL", "info")),
+		TrustProxyHeaders:     getenvBool("TRUST_PROXY_HEADERS", false),
+		PublicCORSOrigins:     splitCSV(os.Getenv("PUBLIC_CORS_ORIGINS")),
+		MaxJSONBytes:          getenvInt64("MAX_JSON_BYTES", 1<<20),
+		MaxUploadBytes:        getenvInt64("MAX_UPLOAD_BYTES", 20<<20),
+		FormRateLimit:         int(getenvInt64("FORM_RATE_LIMIT", 20)),
+		FormRateWindow:        time.Minute,
+		ReadHeaderTimeout:     10 * time.Second,
+		ShutdownTimeout:       20 * time.Second,
 		S3: S3Config{
 			Endpoint:       getenv("S3_ENDPOINT", "http://localhost:9000"),
 			Region:         getenv("S3_REGION", "us-east-1"),

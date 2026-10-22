@@ -23,6 +23,14 @@ import (
 	releaseprovider "websiteengine/features/releases/provider"
 )
 
+// ConfigureSourceHosts extends the release-source allow-list (extra exact
+// hostnames, e.g. a self-hosted Gitea/GitLab) and optionally permits plain
+// http:// sources. Must be called once at process startup, before any
+// source sync.
+func ConfigureSourceHosts(extraHosts []string, allowInsecure bool) {
+	releaseprovider.Configure(extraHosts, allowInsecure)
+}
+
 type Service struct {
 	repo     *Repository
 	store    storage.ObjectStore

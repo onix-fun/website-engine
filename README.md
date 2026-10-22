@@ -150,6 +150,8 @@ docs/API.md                контракт API
 | `RELEASE_MASTER_KEY` | — | 32-байтный base64-ключ шифрования токенов источников релизов |
 | `MAX_RELEASE_BYTES` | `268435456` | максимальный размер zip-артефакта (1 МиБ–2 ГиБ, по умолчанию 256 МиБ) |
 | `RELEASE_CACHE_DIR` | `./data/releases` | кеш распакованных релизов |
+| `RELEASE_SOURCE_HOSTS` | — | дополнительные точные имена хостов Git-источников (CSV), например self-hosted Gitea/GitLab: `gitea.internal,gitlab.mycorp` |
+| `RELEASE_SOURCE_ALLOW_INSECURE` | `false` | разрешить `http://` для Git-источников (только для локальной отладки) |
 | `TLS_ENABLED` | `false` | HTTPS-листенер с ACME/SNI-роутингом по доменам сред (см. `docs/RELEASES.md`) |
 | `HTTPS_ADDR` | `:443` | адрес TLS-листенера |
 | `TLS_HTTP_ADDR` | `:80` | адрес challenge-листенера (ACME + redirect) |

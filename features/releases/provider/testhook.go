@@ -5,6 +5,8 @@ import "net/http"
 // testClient and testAllowedHosts exist only for unit tests: package-level
 // hooks that a fake httptest server can use. Production never sets them;
 // NewGitHub/NewGitLab/NewGitea and isAllowedHost keep their strict defaults.
+// Production-variant of the host list / insecure flag is configured via
+// Configure (configure.go) and carries no default.
 var (
 	testClient       *http.Client
 	testAllowedHosts []string
@@ -37,6 +39,11 @@ func allowedHost(host string) bool {
 	if isAllowedHost(host) {
 		return true
 	}
+	for _, h := range extraHosts {
+		if h == host {
+			return true
+		}
+	}
 	for _, h := range testAllowedHosts {
 		if h == host {
 			return true
@@ -45,10 +52,11 @@ func allowedHost(host string) bool {
 	return false
 }
 
-// schemeOK accepts only https in production; tests may allow http.
+// schemeOK accepts only https in production; the insecure option (and tests)
+// may allow http.
 func schemeOK(scheme string) bool {
 	if scheme == "https" {
 		return true
 	}
-	return testInsecureOK && scheme == "http"
+	return scheme == "http" && (allowInsecure || testInsecureOK)
 }

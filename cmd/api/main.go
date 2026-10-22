@@ -175,6 +175,7 @@ func run(log *slog.Logger) error {
 		}
 	}
 	releaseService := releases.NewService(releaseRepo, objectStore, box, cfg.MaxReleaseBytes)
+	releases.ConfigureSourceHosts(cfg.ProviderExtraHosts, cfg.ProviderAllowInsecure)
 	releaseHandler := hreleases.NewHandler(releaseService, log, cfg.MaxReleaseBytes)
 	siteManager := site.NewManagerWithLogger(site.NewRepository(pool), objectStore, cfg.ReleaseCacheDir, log)
 

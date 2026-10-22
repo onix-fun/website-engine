@@ -47,6 +47,11 @@ TLS/ACME-роутинг по доменам.
 `version` и `tag`; если `version` не указан, используется первые 12 символов
 sha256 артефакта.
 
+Хосты репозиториев ограничены allow-list'ом: `github.com`, `gitlab.com`,
+`gitea.com` и CDN актуетов. Self-hosted GitLab/Gitea добавляются переменной
+`RELEASE_SOURCE_HOSTS` (точные имена хостов, CSV); `http://` разрешён только
+для локальной отладки через `RELEASE_SOURCE_ALLOW_INSECURE=true`.
+
 ## Активация, откат и продвижение
 
 `POST /api/v1/admin/releases/{id}/activate` — переключение указателя среды.
@@ -105,6 +110,8 @@ PATCH `/api/v1/admin/site/environments/{key}` требует актуальну�
 | `RELEASE_MASTER_KEY`     | 32-байтный ключ шифрования токенов источников     |
 | `MAX_RELEASE_BYTES`      | Максимальный размер артефакта (байт)              |
 | `RELEASE_CACHE_DIR`      | Каталог кеша распакованных релизов                |
+| `RELEASE_SOURCE_HOSTS`   | Доп. точные хосты Git-источников (CSV), например self-hosted Gitea/GitLab |
+| `RELEASE_SOURCE_ALLOW_INSECURE` | Разрешить `http://` источники (только локальная отладка, по умолчанию `false`) |
 | `TLS_ENABLED`            | Вкл/выкл HTTPS-listener и autocert                |
 | `HTTPS_ADDR`             | Адрес TLS-листенера (`:443`)                      |
 | `TLS_HTTP_ADDR`          | Адрес challenge-листенера (`:80`)                 |

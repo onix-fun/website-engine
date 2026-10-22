@@ -130,10 +130,7 @@ func isAllowedHost(host string) bool {
 	if host == "github.com" || host == "api.github.com" || host == "objects.githubusercontent.com" || host == "release-assets.githubusercontent.com" {
 		return true
 	}
-	if host == "gitlab.com" || host == "gitlab.example.com" {
-		return true
-	}
-	if strings.Contains(host, "gitea") {
+	if host == "gitlab.com" || host == "gitea.com" {
 		return true
 	}
 	return false
