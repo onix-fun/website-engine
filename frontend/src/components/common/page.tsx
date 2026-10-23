@@ -1,5 +1,6 @@
 import {
   useEffect,
+  useRef,
   useState,
   type ReactNode,
 } from "react";
@@ -276,12 +277,25 @@ export function useDocumentTitle(title: string | undefined) {
 /**
  * Blocks in-app navigation and browser unload while an editor has unsaved
  * local changes. The in-app dialog offers an explicit "leave" choice.
+ *
+ * `allowRef` lets the editor permit a programmatic navigation (e.g. replacing
+ * `/content/new` with the URL of the entry it just created) even though the
+ * `dirty` state has not re-rendered yet. The caller sets the flag right before
+ * navigating; it is cleared automatically afterwards.
  */
-export function useUnsavedChangesGuard(dirty: boolean) {
-  const blocker = useBlocker(
-    ({ currentLocation, nextLocation }) =>
-      dirty && currentLocation.pathname !== nextLocation.pathname,
-  );
+export function useUnsavedChangesGuard(
+  dirty: boolean,
+  allowRef?: { current: boolean },
+) {
+  const dirtyRef = useRef(dirty);
+  dirtyRef.current = dirty;
+  const blocker = useBlocker(({ currentLocation, nextLocation }) => {
+    if (allowRef?.current) {
+      allowRef.current = false;
+      return false;
+    }
+    return dirtyRef.current && currentLocation.pathname !== nextLocation.pathname;
+  });
 
   useEffect(() => {
     if (!dirty) return;

@@ -8,6 +8,7 @@ import { Badge } from "@/components/ui/badge";
  */
 export type EntryPublishState =
   | "draft"
+  | "published_dev"
   | "published"
   | "published_with_draft"
   | "unpublished"
@@ -19,6 +20,10 @@ export function entryPublishState(entry: EntryDetail): EntryPublishState {
     return "published_with_draft";
   }
   if (entry.prod_version_id) return "published";
+  if (entry.dev_version_id && entry.draft_version_id) {
+    return "published_dev";
+  }
+  if (entry.dev_version_id) return "published_dev";
   if (entry.draft_version_id) return "draft";
   return "unpublished";
 }
@@ -28,6 +33,7 @@ const stateConfig: Record<
   { label: string; variant: "default" | "secondary" | "outline" | "muted" | "destructive" | "success" | "warning" | "info" }
 > = {
   draft: { label: "Только черновик", variant: "warning" },
+  published_dev: { label: "Публикация в dev", variant: "info" },
   published: { label: "Опубликовано", variant: "success" },
   published_with_draft: { label: "Есть новый черновик", variant: "info" },
   unpublished: { label: "Снято с публикации", variant: "muted" },
@@ -36,6 +42,7 @@ const stateConfig: Record<
 
 const stateIcons: Record<EntryPublishState, typeof FileText> = {
   draft: FileClock,
+  published_dev: FileClock,
   published: FileText,
   published_with_draft: PencilLine,
   unpublished: EyeOff,

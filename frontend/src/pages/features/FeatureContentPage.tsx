@@ -94,7 +94,7 @@ const sortOptions: Array<{ value: SortOption; label: string }> = [
 ];
 
 function entryData(entry: EntryDetail): JsonObject | null {
-  return entry.draft?.data ?? entry.prod?.data ?? null;
+  return entry.draft?.data ?? entry.dev?.data ?? entry.prod?.data ?? null;
 }
 
 function useEntryFilterParams() {
@@ -153,7 +153,12 @@ export default function FeatureContentPage() {
     queryFn: ({ signal }) => api.features.draft(feature.id, signal),
   });
   const fields = useMemo(
-    () => parsedSchema(schemaQuery.data?.draft?.schema ?? schemaQuery.data?.prod?.schema).fields,
+    () =>
+      parsedSchema(
+        schemaQuery.data?.draft?.schema ??
+          schemaQuery.data?.dev?.schema ??
+          schemaQuery.data?.prod?.schema,
+      ).fields,
     [schemaQuery.data],
   );
   const blocksKey = useMemo(() => blocksKeyFromFields(fields), [fields]);
@@ -201,7 +206,11 @@ export default function FeatureContentPage() {
     const list = loadedEntries.filter((entry) => {
       const entryState = entryPublishState(entry);
       if (state === "published") {
-        if (entryState !== "published" && entryState !== "published_with_draft") {
+        if (
+          entryState !== "published" &&
+          entryState !== "published_with_draft" &&
+          entryState !== "published_dev"
+        ) {
           return false;
         }
       }
@@ -223,8 +232,8 @@ export default function FeatureContentPage() {
         return new Date(a.created_at).getTime() - new Date(b.created_at).getTime();
       }
       if (sort === "title_asc") {
-        return deriveEntryTitle(entryData(a)).localeCompare(
-          deriveEntryTitle(entryData(b)),
+        return deriveEntryTitle(entryData(a), fields).localeCompare(
+          deriveEntryTitle(entryData(b), fields),
           "ru",
         );
       }
@@ -274,7 +283,7 @@ export default function FeatureContentPage() {
   });
 
   const requestUnpublish = async (entry: EntryDetail) => {
-    const title = deriveEntryTitle(entryData(entry));
+    const title = deriveEntryTitle(entryData(entry), fields);
     const confirmed = await confirm({
       title: "Снять запись с публикации?",
       description: (
@@ -291,7 +300,7 @@ export default function FeatureContentPage() {
   };
 
   const requestArchive = async (entry: EntryDetail) => {
-    const title = deriveEntryTitle(entryData(entry));
+    const title = deriveEntryTitle(entryData(entry), fields);
     const confirmed = await confirm({
       title: "Отправить запись в архив?",
       description: (
@@ -386,7 +395,7 @@ export default function FeatureContentPage() {
       <EmptyState
         icon={Layers}
         title="Запись ещё не создана"
-        description="Feature типа single содержит одну запись. Создайте её, чтобы открыть блочный редактор."
+        description="Feature типа single содержит одну запись. Создайте её, чтобы открыть редактор."
         action={
           <Button asChild>
             <Link to={`/features/${feature.id}/content/new`}>
@@ -549,7 +558,7 @@ export default function FeatureContentPage() {
           description={
             filtersActive
               ? "По заданным условиям ничего не найдено. Сбросьте фильтры или измените запрос."
-              : "Создайте первую запись — откроется блочный редактор с автосохранением черновика."
+              : "Создайте первую запись — откроется редактор с автосохранением черновика."
           }
           action={
             filtersActive ? (
@@ -616,8 +625,8 @@ export default function FeatureContentPage() {
               <tbody>
                 {entries.map((entry) => {
                   const data = entryData(entry);
-                  const title = deriveEntryTitle(data);
-                  const subtitle = deriveEntrySubtitle(data, title);
+                  const title = deriveEntryTitle(data, fields);
+                  const subtitle = deriveEntrySubtitle(data, fields, title);
                   const entryState = entryPublishState(entry);
                   return (
                     <tr key={entry.id}>
@@ -692,8 +701,8 @@ export default function FeatureContentPage() {
           <div className="grid gap-3 md:hidden">
             {entries.map((entry) => {
               const data = entryData(entry);
-              const title = deriveEntryTitle(data);
-              const subtitle = deriveEntrySubtitle(data, title);
+              const title = deriveEntryTitle(data, fields);
+              const subtitle = deriveEntrySubtitle(data, fields, title);
               const entryState = entryPublishState(entry);
               return (
                 <div key={entry.id} className="rounded-lg border border-border bg-card p-4">

@@ -282,30 +282,113 @@ const TITLE_KEYS = [
   "имя",
 ];
 
-export function deriveEntryTitle(data: JsonObject | null | undefined): string {
+const UUID_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/** Raw long markdown / uuid / url values are never good entry titles. */
+function isTitleLike(value: string): boolean {
+  const trimmed = value.trim();
+  if (!trimmed) return false;
+  if (trimmed.startsWith("#")) return false; // markdown heading
+  if (trimmed.startsWith("http")) return false;
+  if (UUID_PATTERN.test(trimmed)) return false; // media id
+  return trimmed.length <= 160;
+}
+
+type TitleField = { key: string; type: string };
+
+/** The first string/text field in schema order; title-keys win. */
+export function entryTitleField(
+  fields?: TitleField[] | null,
+): TitleField | null {
+  const titleKeys = new Set(TITLE_KEYS);
+  for (const field of fields ?? []) {
+    if (
+      (field.type === "string" || field.type === "text") &&
+      titleKeys.has(field.key)
+    ) {
+      return field;
+    }
+  }
+  for (const field of fields ?? []) {
+    if (field.type !== "string" && field.type !== "text") continue;
+    if (field.key === "body" || field.key === "content" || field.key === "text") {
+      continue;
+    }
+    return field;
+  }
+  return null;
+}
+
+/**
+ * Picks a human title for entry data. Prefers schema order (first string/text
+ * field), then well-known keys; raw fallback skips media ids, markdown and
+ * urls so lists never show "## header" or raw uuids.
+ */
+export function deriveEntryTitle(
+  data: JsonObject | null | undefined,
+  fields?: TitleField[] | null,
+): string {
   if (!data) return "Без названия";
+  const titleKeys = new Set(TITLE_KEYS);
+  for (const field of fields ?? []) {
+    if (field.type !== "string" && field.type !== "text") continue;
+    if (titleKeys.has(field.key) && typeof data[field.key] === "string" && String(data[field.key]).trim()) {
+      return String(data[field.key]).trim();
+    }
+  }
+  for (const field of fields ?? []) {
+    if (field.type !== "string" && field.type !== "text") continue;
+    if (titleKeys.has(field.key)) continue; // already tried, missing/empty
+    if (field.key === "body" || field.key === "content" || field.key === "text") {
+      continue; // long content fields are last resort
+    }
+    const value = data[field.key];
+    if (typeof value === "string" && isTitleLike(value)) return value.trim();
+  }
   for (const key of TITLE_KEYS) {
     const value = data[key];
-    if (typeof value === "string" && value.trim()) return value.trim();
+    if (typeof value === "string" && isTitleLike(value)) return value.trim();
   }
   for (const value of Object.values(data)) {
-    if (typeof value === "string" && value.trim()) return value.trim();
+    if (typeof value === "string" && isTitleLike(value)) return value.trim();
   }
   return "Без названия";
 }
 
+/** Two short human-readable facts for lists, schema-ordered, no media/urls. */
 export function deriveEntrySubtitle(
   data: JsonObject | null | undefined,
+  fields?: TitleField[] | null,
   exclude?: string,
 ): string {
   if (!data) return "";
   const parts: string[] = [];
-  for (const value of Object.values(data)) {
-    if (exclude && value === exclude) continue;
+  const consumed = new Set<string>();
+  const excluded = exclude?.trim() ?? "";
+  const bodyKeys = new Set(["body", "content", "text", "annotation"]);
+  const consume = (key: string): void => {
+    if (parts.length >= 2) return;
+    if (consumed.has(key)) return;
+    consumed.add(key);
+    if (bodyKeys.has(key)) return; // long content fields are titles, not facts
+    const value = data[key];
     if (typeof value === "string" && value.trim() && !value.startsWith("http")) {
-      parts.push(value.trim());
+      const trimmed = value.trim();
+      if (trimmed === excluded) return; // the title is already rendered above
+      if (!UUID_PATTERN.test(trimmed) && !trimmed.startsWith("#") && trimmed.length <= 120) {
+        parts.push(trimmed);
+      }
+    } else if (typeof value === "number" && Number.isFinite(value)) {
+      parts.push(String(value));
+    } else if (typeof value === "boolean") {
+      parts.push(value ? "да" : "нет");
     }
+  };
+  for (const field of fields ?? []) consume(field.key);
+  for (const key of Object.keys(data)) {
     if (parts.length >= 2) break;
+    consume(key);
   }
   return parts.join(" · ");
 }

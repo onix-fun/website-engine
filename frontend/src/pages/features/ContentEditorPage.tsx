@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -31,7 +31,8 @@ import type {
 import { queryKeys } from "@/lib/query-keys";
 import { errorMessage } from "@/lib/errors";
 import { formatDateTime, truncate } from "@/lib/format";
-import { cn } from "@/lib/utils";
+import { cn, isRecord } from "@/lib/utils";
+import { entryTitleField } from "@/lib/json";
 import { useFeatureContext } from "@/pages/features/FeatureLayout";
 import { useConfirm } from "@/components/common/confirm";
 import {
@@ -106,16 +107,32 @@ function collectMediaIds(
       block.data.mediaIds.forEach((id) => ids.add(id));
     }
   });
-  fields.forEach((field) => {
-    if (field.type !== "media") return;
-    const value = state.metadata[field.key];
+  const addMedia = (value: unknown) => {
     if (typeof value === "string" && value) ids.add(value);
-    if (Array.isArray(value)) {
-      value.forEach((item) => {
-        if (typeof item === "string" && item) ids.add(item);
-      });
+    if (Array.isArray(value)) value.forEach(addMedia);
+  };
+  const walk = (field: SchemaFieldNode, value: JsonValue | undefined) => {
+    if (field.type === "media") {
+      addMedia(value);
+      return;
     }
-  });
+    if (field.type === "object") {
+      if (!isRecord(value)) return;
+      field.children.forEach((child) => walk(child, value[child.key]));
+      return;
+    }
+    if (field.type === "array") {
+      if (!Array.isArray(value)) return;
+      if (field.itemType === "media") addMedia(value);
+      if (field.itemType === "object") {
+        value.forEach((item) => {
+          if (!isRecord(item)) return;
+          field.children.forEach((child) => walk(child, item[child.key]));
+        });
+      }
+    }
+  };
+  fields.forEach((field) => walk(field, state.metadata[field.key]));
   return Array.from(ids);
 }
 
@@ -202,6 +219,7 @@ export default function ContentEditorPage() {
   } = useEditorHistory<DocumentState>({ metadata: {}, blocks: [] });
 
   const [seeded, setSeeded] = useState(false);
+  const guardBypassRef = useRef(false);
   const [preview, setPreview] = useState(false);
   const [previewWidth, setPreviewWidth] = useState<PreviewWidth>("desktop");
   const [historyOpen, setHistoryOpen] = useState(false);
@@ -231,6 +249,10 @@ export default function ContentEditorPage() {
         queryKey: queryKeys.entries.list(feature.id),
       });
       void queryClient.invalidateQueries({ queryKey: queryKeys.overview });
+      // The dirty flag has not re-rendered yet, so let the guard through
+      // explicitly; otherwise the user is stuck on /content/new with the
+      // "unsaved changes" dialog right after the first autosave.
+      guardBypassRef.current = true;
       navigate(`/features/${feature.id}/content/${entry.id}`, { replace: true });
       toast.success("Черновик создан");
     },
@@ -315,7 +337,7 @@ export default function ContentEditorPage() {
   ]);
 
   const dirty = autosave.dirty;
-  const guard = useUnsavedChangesGuard(dirty);
+  const guard = useUnsavedChangesGuard(dirty, guardBypassRef);
 
   const updateMetadata = useCallback(
     (key: string, value: JsonValue) => {
@@ -332,25 +354,19 @@ export default function ContentEditorPage() {
 
 
   const title = useMemo(
-    () => deriveDocumentTitle(editorState.metadata, editorState.blocks),
-    [editorState],
+    () => deriveDocumentTitle(editorState.metadata, editorState.blocks, fields),
+    [editorState, fields],
   );
 
   const titleField = useMemo(() => {
-    const preferred = fields.find(
-      (field) =>
-        ["title", "name", "heading"].includes(field.key) &&
-        field.type !== "blocks" &&
-        (field.type === "string" || field.type === "text"),
-    );
-    if (preferred) return preferred;
+    // Keep the title card and the preview/list derivation in sync: both use
+    // the schema-aware "first sensible string" pick from lib/json.
+    const picked = entryTitleField(fields);
+    if (!picked) return undefined;
     return fields.find(
-      (field) =>
-        (field.type === "string" || field.type === "text") &&
-        field.key !== blocksKey &&
-        field.key.trim(),
+      (field) => field.key === picked.key && field.type !== "blocks",
     );
-  }, [fields, blocksKey]);
+  }, [fields]);
   const blockingIssues = useMemo(
     () => validateEntryFields(fields, editorState.metadata),
     [fields, editorState.metadata],
@@ -638,6 +654,11 @@ export default function ContentEditorPage() {
   const archived = Boolean(entry?.archived_at) || featureArchived;
   const hasPublished = Boolean(entry?.prod);
   const hasDraft = Boolean(entry?.draft);
+  // A draft newer than the published dev version is not part of dev yet, so
+  // promoting would silently push stale content to prod.
+  const pendingDraft = Boolean(
+    entry?.draft && (!entry.dev || entry.draft.version > entry.dev.version),
+  );
 
   return (
     <div className="space-y-4">
@@ -722,8 +743,14 @@ export default function ContentEditorPage() {
               variant="outline"
               onClick={() => promoteMutation.mutate()}
               loading={promoteMutation.isPending}
-              disabled={archived || !entry?.dev}
-              title={entry?.dev ? "Продвинуть текущую dev-версию в prod" : "Сначала опубликуйте запись в dev"}
+              disabled={archived || !entry?.dev || pendingDraft || dirty}
+              title={
+                !entry?.dev
+                  ? "Сначала опубликуйте запись в dev"
+                  : dirty || pendingDraft
+                    ? "Сначала опубликуйте черновик в dev — иначе в prod уйдёт предыдущая версия"
+                    : "Продвинуть текущую dev-версию в prod"
+              }
             >
               В prod
             </Button>

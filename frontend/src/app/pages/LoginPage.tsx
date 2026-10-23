@@ -147,7 +147,7 @@ export function LoginPage() {
             Операционная панель управления контентом
           </h1>
           <p className="mt-4 text-sm leading-7 text-muted-foreground">
-            Схемы, блочный редактор, черновики, публикации, заявки и медиатека —
+            Схемы, редактор контента, черновики, публикации, заявки и медиатека —
             в одном рабочем пространстве с явным жизненным циклом данных.
           </p>
           <div className="mt-8 grid gap-4 border-t border-border pt-6 sm:grid-cols-3">

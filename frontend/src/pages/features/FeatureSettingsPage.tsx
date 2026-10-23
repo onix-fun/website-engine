@@ -211,7 +211,10 @@ export default function FeatureSettingsPage() {
             <MetaRow label="Draft version ID">
               <code className="break-all text-xs">{feature.draft_version_id ?? "—"}</code>
             </MetaRow>
-            <MetaRow label="Published version ID">
+            <MetaRow label="Dev version ID">
+              <code className="break-all text-xs">{feature.dev_version_id ?? "—"}</code>
+            </MetaRow>
+            <MetaRow label="Prod version ID">
               <code className="break-all text-xs">{feature.prod_version_id ?? "—"}</code>
             </MetaRow>
           </dl>

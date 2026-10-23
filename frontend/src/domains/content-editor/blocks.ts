@@ -244,8 +244,6 @@ export function starterValue(field: SchemaFieldNode): JsonValue {
       });
       return object;
     }
-    case "array":
-      return [];
     case "blocks":
       return [];
     case "date":
@@ -269,8 +267,9 @@ export function starterMetadata(fields: SchemaFieldNode[], blocksKey: string | n
 export function deriveDocumentTitle(
   metadata: JsonObject,
   blocks: ContentBlock[],
+  fields?: { key: string; type: string }[] | null,
 ): string {
-  const fromMeta = deriveEntryTitle(metadata);
+  const fromMeta = deriveEntryTitle(metadata, fields);
   if (fromMeta !== "Без названия") return fromMeta;
   const heading = blocks.find(
     (block): block is HeadingBlock => block.type === "heading" && block.data.text.trim().length > 0,

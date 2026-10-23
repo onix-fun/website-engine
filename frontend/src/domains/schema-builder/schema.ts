@@ -280,10 +280,17 @@ function fieldToSchema(field: SchemaFieldNode): JsonObject {
         type: nullableType("string", field.nullable),
         enum: values,
       };
+      // applyCommon re-emits x-ui from buildUi, so the enum labels have to be
+      // merged afterwards — otherwise any field with a label/placeholder would
+      // silently drop the option labels on the next save.
+      const withCommon = applyCommon(schema, field);
       if (labels) {
-        schema["x-ui"] = { ...(buildUi(field) ?? {}), labels };
+        withCommon["x-ui"] = {
+          ...(isRecord(withCommon["x-ui"]) ? withCommon["x-ui"] : {}),
+          labels,
+        };
       }
-      return applyCommon(schema, field);
+      return withCommon;
     }
     case "object":
       return applyCommon(buildObjectSchema(field), field);

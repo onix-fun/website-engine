@@ -75,11 +75,11 @@ export function SchemaStateBadge({
       </Badge>
     );
   }
-  if (feature.draft_version_id) {
+  if (feature.dev_version_id && feature.draft_version_id) {
     return (
       <Badge variant="warning">
         <CircleDashed aria-hidden="true" />
-        Только черновик
+        Черновик к схеме в dev
       </Badge>
     );
   }
@@ -89,6 +89,14 @@ export function SchemaStateBadge({
       <Badge variant="success">
         <CheckCircle2 aria-hidden="true" />
         Схема в dev
+      </Badge>
+    );
+  }
+  if (feature.draft_version_id) {
+    return (
+      <Badge variant="warning">
+        <CircleDashed aria-hidden="true" />
+        Только черновик
       </Badge>
     );
   }

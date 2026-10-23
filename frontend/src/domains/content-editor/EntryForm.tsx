@@ -32,6 +32,7 @@ import {
 } from "@/components/ui/dialog";
 import { MediaPickerDialog } from "@/domains/media/MediaPickerDialog";
 import type { Media } from "@/types";
+import { starterValue } from "./blocks";
 
 /**
  * Strict, schema-driven entry editor. Every visible field comes from the
@@ -1056,50 +1057,6 @@ function ArrayEditorValue({
     />
   );
 }
-
-export function starterValue(field: SchemaFieldNode): JsonValue {
-  if (field.defaultValue) {
-    switch (field.type) {
-      case "number":
-      case "integer": {
-        const parsed = Number(field.defaultValue);
-        return Number.isFinite(parsed) ? parsed : 0;
-      }
-      case "boolean":
-        return field.defaultValue === "true";
-      default:
-        return field.defaultValue;
-    }
-  }
-  switch (field.type) {
-    case "number":
-    case "integer":
-      return 0;
-    case "boolean":
-      return false;
-    case "enum":
-      return field.enumValues.find((option) => option.value.trim())?.value.trim() ?? "";
-    case "object": {
-      const object: JsonObject = {};
-      field.children.forEach((child) => {
-        if (child.key.trim()) object[child.key.trim()] = starterValue(child);
-      });
-      return object;
-    }
-    case "array":
-      return [];
-    case "date":
-      return new Date().toISOString().slice(0, 10);
-    case "dateTime":
-      return new Date().toISOString();
-    default:
-      return "";
-  }
-}
-
-// ---------------------------------------------------------------------------
-// JSON escape hatch (kept for legacy / edge-case data)
-// ---------------------------------------------------------------------------
 
 function JsonFieldDialog({
   field,

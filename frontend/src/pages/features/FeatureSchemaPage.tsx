@@ -80,7 +80,6 @@ function starterFields(type: FeatureDetail["type"]): SchemaFieldNode[] {
       minLength: 1,
     }),
     createField("text", { key: "description", label: "Описание" }),
-    createField("blocks", { key: "blocks", label: "Содержание" }),
   ];
 }
 
@@ -169,7 +168,10 @@ export default function FeatureSchemaPage() {
   useEffect(() => {
     if (seeded || !draftQuery.data) return;
     const serverSchema =
-      draftQuery.data.draft?.schema ?? draftQuery.data.prod?.schema ?? null;
+      draftQuery.data.draft?.schema ??
+      draftQuery.data.dev?.schema ??
+      draftQuery.data.prod?.schema ??
+      null;
     const { fields: parsedFields, warnings } = serverSchema
       ? parsedSchema(serverSchema)
       : { fields: starterFields(feature.type), warnings: [] };
@@ -192,7 +194,8 @@ export default function FeatureSchemaPage() {
   const warnings = issues.filter((issue) => issue.severity === "warning");
   const revision = draftQuery.data?.revision ?? feature.revision;
   const hasDraft = Boolean(draftQuery.data?.draft);
-  const currentPublished = draftQuery.data?.prod ?? feature.prod;
+  const currentPublished =
+    draftQuery.data?.prod ?? draftQuery.data?.dev ?? feature.prod ?? null;
   const compatibility = useMemo(
     () => compatibilityWarnings(fields, currentPublished),
     [fields, currentPublished],
@@ -232,7 +235,7 @@ export default function FeatureSchemaPage() {
       toast.error(error.message, { description: "Ревизия изменилась. Локальные изменения сохранены в конструкторе." });
       try {
         const fresh = await api.features.draft(feature.id);
-        setRemoteSchema(fresh.draft?.schema ?? fresh.prod?.schema ?? null);
+        setRemoteSchema(fresh.draft?.schema ?? fresh.dev?.schema ?? fresh.prod?.schema ?? null);
       } catch {
         setRemoteSchema(null);
       }
@@ -349,7 +352,8 @@ export default function FeatureSchemaPage() {
     if (!confirmed) return;
     try {
       const fresh = await api.features.draft(feature.id);
-      const source = fresh.draft?.schema ?? fresh.prod?.schema ?? null;
+      const source =
+        fresh.draft?.schema ?? fresh.dev?.schema ?? fresh.prod?.schema ?? null;
       const parsed = source ? parsedSchema(source) : { fields: starterFields(feature.type), warnings: [] };
       const nextFields = source ? parsed.fields : starterFields(feature.type);
       setFields(nextFields);
@@ -396,7 +400,8 @@ export default function FeatureSchemaPage() {
       void queryClient.invalidateQueries({
         queryKey: queryKeys.features.detail(feature.id),
       });
-      const source = detail.draft?.schema ?? detail.prod?.schema ?? null;
+      const source =
+        detail.draft?.schema ?? detail.dev?.schema ?? detail.prod?.schema ?? null;
       if (source) {
         const parsed = parsedSchema(source);
         setFields(parsed.fields);
@@ -505,8 +510,21 @@ export default function FeatureSchemaPage() {
             variant="outline"
             onClick={() => promoteMutation.mutate()}
             loading={promoteMutation.isPending}
-            disabled={archived || !canEdit || !draftQuery.data?.dev || promoteMutation.isPending}
-            title={draftQuery.data?.dev ? "Продвинуть текущую dev-схему в prod" : "Сначала опубликуйте схему в dev"}
+            disabled={
+              archived ||
+              !canEdit ||
+              !draftQuery.data?.dev ||
+              hasDraft ||
+              dirty ||
+              promoteMutation.isPending
+            }
+            title={
+              !draftQuery.data?.dev
+                ? "Сначала опубликуйте схему в dev"
+                : hasDraft || dirty
+                  ? "Сначала опубликуйте черновик схемы — иначе в prod уйдёт предыдущая версия"
+                  : "Продвинуть текущую dev-схему в prod"
+            }
           >
             В prod
           </Button>
