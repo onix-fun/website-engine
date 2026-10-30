@@ -53,6 +53,48 @@ interface RequestOptions {
   suppressUnauthorizedEvent?: boolean;
 }
 
+function arrayOrEmpty<T>(value: T[] | null | undefined): T[] {
+  return Array.isArray(value) ? value : [];
+}
+
+async function requestList<T>(
+  path: string,
+  options: RequestOptions = {},
+): Promise<ListResponse<T>> {
+  const response = await request<{
+    items?: T[] | null;
+    next_cursor?: string | null;
+  } | null>(path, options);
+  return {
+    items: arrayOrEmpty(response?.items),
+    next_cursor: response?.next_cursor ?? null,
+  };
+}
+
+async function requestItems<T>(
+  path: string,
+  options: RequestOptions = {},
+): Promise<{ items: T[] }> {
+  const response = await request<{ items?: T[] | null } | null>(path, options);
+  return { items: arrayOrEmpty(response?.items) };
+}
+
+function normalizeSiteDraft(draft: SiteDraftState): SiteDraftState {
+  const config = draft?.config;
+  return {
+    ...draft,
+    config: {
+      ...config,
+      formatVersion: 1,
+      pages: arrayOrEmpty(config?.pages).map((page) => ({
+        ...page,
+        placements: arrayOrEmpty(page?.placements),
+      })),
+      routes: arrayOrEmpty(config?.routes),
+    },
+  };
+}
+
 export class ApiError extends Error {
   readonly status: number;
   readonly code: string;
@@ -284,14 +326,24 @@ export const api = {
   },
 
   overview: {
-    get(signal?: AbortSignal): Promise<Overview> {
-      return request<Overview>(`${ADMIN_ROOT}/overview`, { signal });
+    async get(signal?: AbortSignal): Promise<Overview> {
+      const overview = await request<Overview>(`${ADMIN_ROOT}/overview`, { signal });
+      return {
+        ...overview,
+        attention: {
+          ...overview?.attention,
+          draft_features: arrayOrEmpty(overview?.attention?.draft_features),
+          new_submissions: arrayOrEmpty(overview?.attention?.new_submissions),
+          failed_media: arrayOrEmpty(overview?.attention?.failed_media),
+        },
+        recent_activity: arrayOrEmpty(overview?.recent_activity),
+      };
     },
   },
 
   tokens: {
     list(signal?: AbortSignal): Promise<ListResponse<Token>> {
-      return request<ListResponse<Token>>(`${ADMIN_ROOT}/tokens`, { signal });
+      return requestList<Token>(`${ADMIN_ROOT}/tokens`, { signal });
     },
     get(id: string): Promise<Token> {
       return request<Token>(`${ADMIN_ROOT}/tokens/${encoded(id)}`);
@@ -314,7 +366,7 @@ export const api = {
       params: FeatureListParams = {},
       signal?: AbortSignal,
     ): Promise<ListResponse<Feature>> {
-      return request<ListResponse<Feature>>(`${ADMIN_ROOT}/features`, {
+      return requestList<Feature>(`${ADMIN_ROOT}/features`, {
         signal,
         query: {
           status: params.status,
@@ -348,7 +400,7 @@ export const api = {
       });
     },
     versions(id: string, signal?: AbortSignal): Promise<{ items: FeatureVersion[] }> {
-      return request<{ items: FeatureVersion[] }>(
+      return requestItems<FeatureVersion>(
         `${ADMIN_ROOT}/features/${encoded(id)}/versions`,
         { signal },
       );
@@ -395,7 +447,7 @@ export const api = {
       params: EntryListParams = {},
       signal?: AbortSignal,
     ): Promise<ListResponse<EntryDetail>> {
-      return request<ListResponse<EntryDetail>>(
+      return requestList<EntryDetail>(
         `${ADMIN_ROOT}/features/${encoded(featureId)}/entries`,
         {
           signal,
@@ -420,10 +472,10 @@ export const api = {
       entryId?: string,
       revision?: number,
     ): Promise<{ items: EntryDetail[]; imported: number }> {
-      return request<{ items: EntryDetail[]; imported: number }>(
+      return request<{ items: EntryDetail[] | null; imported: number }>(
         `/api/v2/admin/features/${encoded(featureId)}/entries/import`,
         { method: "POST", body: { data, entryId, revision } },
-      );
+      ).then((result) => ({ ...result, items: arrayOrEmpty(result?.items) }));
     },
     get(id: string, signal?: AbortSignal): Promise<EntryDetail> {
       return request<EntryDetail>(`${ADMIN_ROOT}/entries/${encoded(id)}`, {
@@ -431,7 +483,7 @@ export const api = {
       });
     },
     versions(id: string, signal?: AbortSignal): Promise<{ items: EntryVersion[] }> {
-      return request<{ items: EntryVersion[] }>(
+      return requestItems<EntryVersion>(
         `${ADMIN_ROOT}/entries/${encoded(id)}/versions`,
         { signal },
       );
@@ -488,7 +540,7 @@ export const api = {
       limit = 50,
       signal?: AbortSignal,
     ): Promise<ListResponse<Submission>> {
-      return request<ListResponse<Submission>>(
+      return requestList<Submission>(
         `${ADMIN_ROOT}/forms/${encoded(key)}/submissions`,
         {
           signal,
@@ -550,7 +602,7 @@ export const api = {
 
   media: {
     list(params: MediaListParams = {}, signal?: AbortSignal): Promise<ListResponse<Media>> {
-      return request<ListResponse<Media>>(`${ADMIN_ROOT}/media`, {
+      return requestList<Media>(`${ADMIN_ROOT}/media`, {
         signal,
         query: {
           status: params.status,
@@ -576,7 +628,7 @@ export const api = {
       });
     },
     usage(id: string, signal?: AbortSignal): Promise<{ items: MediaUsage[] }> {
-      return request<{ items: MediaUsage[] }>(
+      return requestItems<MediaUsage>(
         `${ADMIN_ROOT}/media/${encoded(id)}/usage`,
         { signal },
       );
@@ -594,14 +646,38 @@ export const api = {
   },
 
   settings: {
-    get(signal?: AbortSignal): Promise<Settings> {
-      return request<Settings>(`${ADMIN_ROOT}/settings`, { signal });
+    async get(signal?: AbortSignal): Promise<Settings> {
+      const settings = await request<Settings>(`${ADMIN_ROOT}/settings`, { signal });
+      return {
+        ...settings,
+        public_api: {
+          ...settings?.public_api,
+          cors_origins: arrayOrEmpty(settings?.public_api?.cors_origins),
+        },
+        media: {
+          ...settings?.media,
+          accepted_types: arrayOrEmpty(settings?.media?.accepted_types),
+          image_variants: arrayOrEmpty(settings?.media?.image_variants),
+        },
+        roles: arrayOrEmpty(settings?.roles)
+          .filter((role) => role && typeof role === "object")
+          .map((role) => ({
+            ...role,
+            notes: arrayOrEmpty(role.notes),
+            permissions: arrayOrEmpty(role.permissions)
+              .filter((permission) => permission && typeof permission === "object")
+              .map((permission) => ({
+                ...permission,
+                actions: arrayOrEmpty(permission.actions),
+              })),
+          })),
+      };
     },
   },
 
   environments: {
     list(signal?: AbortSignal): Promise<{ items: SiteEnvironment[] }> {
-      return request<{ items: SiteEnvironment[] }>(`${ADMIN_ROOT}/site/environments`, { signal });
+      return requestItems<SiteEnvironment>(`${ADMIN_ROOT}/site/environments`, { signal });
     },
     update(key: Environment, patch: EnvironmentPatch): Promise<SiteEnvironment> {
       return request<SiteEnvironment>(`${ADMIN_ROOT}/site/environments/${encoded(key)}`, {
@@ -613,19 +689,26 @@ export const api = {
 
   siteBuilder: {
     featureBuilds(signal?: AbortSignal): Promise<{ items: FeatureBuild[] }> {
-      return request<{ items: FeatureBuild[] }>(`${ADMIN_V2_ROOT}/feature-builds`, { signal });
+      return requestItems<FeatureBuild>(`${ADMIN_V2_ROOT}/feature-builds`, { signal });
     },
-    draft(signal?: AbortSignal): Promise<SiteDraftState> {
-      return request<SiteDraftState>(`${ADMIN_V2_ROOT}/site/draft`, { signal });
+    async draft(signal?: AbortSignal): Promise<SiteDraftState> {
+      const draft = await request<SiteDraftState>(`${ADMIN_V2_ROOT}/site/draft`, { signal });
+      return normalizeSiteDraft(draft);
     },
-    saveDraft(revision: number, config: SiteConfig): Promise<SiteDraftState> {
-      return request<SiteDraftState>(`${ADMIN_V2_ROOT}/site/draft`, {
+    async saveDraft(revision: number, config: SiteConfig): Promise<SiteDraftState> {
+      const draft = await request<SiteDraftState>(`${ADMIN_V2_ROOT}/site/draft`, {
         method: "PUT",
         body: { revision, config },
       });
+      return normalizeSiteDraft(draft);
     },
-    snapshots(signal?: AbortSignal): Promise<SiteSnapshotList> {
-      return request<SiteSnapshotList>(`${ADMIN_V2_ROOT}/site/snapshots`, { signal });
+    async snapshots(signal?: AbortSignal): Promise<SiteSnapshotList> {
+      const snapshots = await request<SiteSnapshotList>(`${ADMIN_V2_ROOT}/site/snapshots`, { signal });
+      return {
+        ...snapshots,
+        items: arrayOrEmpty(snapshots?.items),
+        active: snapshots?.active ?? { dev: "", prod: "" },
+      };
     },
     publish(name: string): Promise<SiteSnapshot> {
       return request<SiteSnapshot>(`${ADMIN_V2_ROOT}/site/snapshots`, {

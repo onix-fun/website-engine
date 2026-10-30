@@ -156,7 +156,9 @@ func (s *BuildService) List(ctx context.Context) ([]BuildRecord, error) {
 		return nil, err
 	}
 	defer rows.Close()
-	var out []BuildRecord
+	// Keep list endpoints JSON-stable: an empty slice encodes as [], while a
+	// nil slice encodes as null and breaks admin views that consume a list.
+	out := make([]BuildRecord, 0)
 	for rows.Next() {
 		var item BuildRecord
 		var manifest, assets []byte

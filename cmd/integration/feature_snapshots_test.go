@@ -161,6 +161,21 @@ func runtimePlacement(t *testing.T, env *testEnv, serverURL, path string) map[st
 	return placements[0].(map[string]any)
 }
 
+func TestFeatureBuildListReturnsEmptyArray(t *testing.T) {
+	env := newTestEnv(t)
+	status, body, _ := env.request(http.MethodGet, "/api/v2/admin/feature-builds", env.adminToken, nil)
+	if status != http.StatusOK {
+		t.Fatalf("list feature builds: status=%d body=%v", status, body)
+	}
+	items, ok := body["items"].([]any)
+	if !ok {
+		t.Fatalf("feature build items must be an array, got %T (%v)", body["items"], body["items"])
+	}
+	if len(items) != 0 {
+		t.Fatalf("expected empty feature build list, got %d items", len(items))
+	}
+}
+
 func TestFeatureBuildSnapshotPinsContentAndPromotesSameSnapshot(t *testing.T) {
 	env := newTestEnv(t)
 	key := "snapshot-single"
