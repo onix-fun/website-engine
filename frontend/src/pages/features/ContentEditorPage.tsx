@@ -351,6 +351,8 @@ export default function ContentEditorPage() {
   ]);
 
   const dirty = autosave.dirty;
+  const hasDraft = Boolean(entryQuery.data?.draft);
+  const hasPublishableContent = hasDraft || dirty;
   const guard = useUnsavedChangesGuard(dirty, guardBypassRef);
 
   const updateMetadata = useCallback(
@@ -432,7 +434,7 @@ export default function ContentEditorPage() {
     onError: (error) => {
       toast.error(errorMessage(error), {
         description:
-          "Черновик сохранён и остаётся доступным для редактирования. Публичный API продолжает отдавать предыдущую опубликованную версию.",
+          "Публичная версия не изменилась. Проверьте состояние черновика и повторите публикацию после исправления проблемы.",
       });
     },
   });
@@ -460,6 +462,12 @@ export default function ContentEditorPage() {
   });
 
   const handlePublish = async () => {
+    if (!hasPublishableContent) {
+      toast.info("Нет новых изменений для публикации", {
+        description: "Измените содержимое, чтобы создать черновик для публикации.",
+      });
+      return;
+    }
     if (blockingIssues.length > 0) {
       toast.error("Заполните обязательные поля перед публикацией", {
         description: blockingIssues
@@ -495,7 +503,8 @@ export default function ContentEditorPage() {
         <div className="space-y-2">
           <p>
             Публикация создаёт новую неизменяемую версию и переключает публичный
-            API на неё. Черновик при этом остаётся доступным для редактирования.
+            API на неё. Версия сохранится в истории; последующие правки создадут
+            новый черновик.
           </p>
           {entryQuery.data?.prod && (
             <p>
@@ -727,7 +736,6 @@ export default function ContentEditorPage() {
   const entry = entryQuery.data;
   const archived = Boolean(entry?.archived_at) || featureArchived;
   const hasPublished = Boolean(entry?.prod);
-  const hasDraft = Boolean(entry?.draft);
   // A draft newer than the published dev version is not part of dev yet, so
   // promoting would silently push stale content to prod.
   const pendingDraft = Boolean(
@@ -822,17 +830,26 @@ export default function ContentEditorPage() {
               size="sm"
               onClick={() => void handlePublish()}
               loading={publishMutation.isPending}
-              disabled={archived || blockingIssues.length > 0}
+              disabled={
+                archived ||
+                blockingIssues.length > 0 ||
+                !hasPublishableContent ||
+                publishMutation.isPending
+              }
               title={
                 blockingIssues.length > 0
                   ? "Исправьте ошибки формы, чтобы опубликовать"
-                  : undefined
+                  : !hasPublishableContent
+                    ? "Сначала измените содержимое, чтобы создать черновик"
+                    : undefined
               }
             >
               <Send />
               {blockingIssues.length > 0
                 ? `Опубликовать (${blockingIssues.length})`
-                : "Опубликовать"}
+                : hasPublishableContent
+                  ? "Опубликовать"
+                  : "Нет изменений"}
             </Button>
             {canPromote && (
               <Button
