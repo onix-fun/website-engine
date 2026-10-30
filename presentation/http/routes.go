@@ -297,7 +297,8 @@ func NewPublicRouter(d Deps, env environment.Environment) http.Handler {
 		mux.Handle(pattern, cors(noop))
 	}
 	// The v1 CMS endpoints remain direct content/form APIs for existing
-	// integrations. The embedded site runtime uses only snapshot-pinned v2.
+	// integrations. The v2 runtime resolves page composition from the active
+	// snapshot and editorial data from independent environment content pointers.
 	mux.Handle("GET /api/v1/content", cors(http.HandlerFunc(d.Content.PublicContent)))
 	mux.Handle("GET /api/v1/content/{key}", cors(http.HandlerFunc(d.Content.PublicFeature)))
 	mux.Handle("GET /api/v1/content/{key}/entries", cors(http.HandlerFunc(d.Content.PublicEntries)))

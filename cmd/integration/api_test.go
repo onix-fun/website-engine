@@ -102,6 +102,8 @@ type testEnv struct {
 	adminToken string
 	store      *fakeStore
 	releases   *releases.Service
+	content    *content.Service
+	snapshots  *sitebuilder.SnapshotService
 }
 
 func newTestEnv(t *testing.T) *testEnv {
@@ -193,7 +195,7 @@ func newTestEnv(t *testing.T) *testEnv {
 	prodServer := httptest.NewServer(httptransport.NewPublicRouter(deps, environment.Prod))
 	t.Cleanup(prodServer.Close)
 	return &testEnv{t: t, pool: pool, server: server, devServer: devServer, prodServer: prodServer,
-		adminToken: testAdminToken, store: store, releases: releaseService}
+		adminToken: testAdminToken, store: store, releases: releaseService, content: contentService, snapshots: snapshotService}
 }
 
 func (e *testEnv) request(method, path, token string, body any) (int, map[string]any, http.Header) {

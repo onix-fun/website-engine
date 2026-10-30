@@ -176,13 +176,13 @@ func TestFeatureBuildListReturnsEmptyArray(t *testing.T) {
 	}
 }
 
-func TestFeatureBuildSnapshotPinsContentAndPromotesSameSnapshot(t *testing.T) {
+func TestFeatureBuildSnapshotKeepsEditorialContentIndependent(t *testing.T) {
 	env := newTestEnv(t)
+	env.content.SetSchemaProvider(env.snapshots)
 	key := "snapshot-single"
 	manifest := manifestFor(key, "1.0.0", "single", objectSchema(map[string]any{"title": map[string]any{"type": "string", "minLength": 1}}, "title"))
 	build := uploadFeatureBuild(t, env, manifest, "export default function Feature() { return 'v1'; }")
 	featureID := build["featureId"].(string)
-	entryID, revision := createAndPublishEntry(t, env, featureID, map[string]any{"title": "Pinned title"})
 	first := saveAndPublishSnapshot(t, env, singlePageConfig(key, "1.0.0"), "first")
 	firstID := first["id"].(string)
 	duplicateSnapshot := saveAndPublishSnapshot(t, env, singlePageConfig(key, "1.0.0"), "same content")
@@ -194,20 +194,25 @@ func TestFeatureBuildSnapshotPinsContentAndPromotesSameSnapshot(t *testing.T) {
 	if status != http.StatusOK || promoted["id"] != firstID {
 		t.Fatalf("promote active dev snapshot: status=%d body=%v", status, promoted)
 	}
+	entryID, revision := createAndPublishEntry(t, env, featureID, map[string]any{"title": "Pinned title"})
+	status, promotedContent, _ := env.request(http.MethodPost, "/api/v1/admin/entries/"+entryID+"/promote", env.adminToken, map[string]any{"revision": revision})
+	if status != http.StatusOK {
+		t.Fatalf("promote content independently: status=%d body=%v", status, promotedContent)
+	}
+	revision = promotedContent["revision"].(float64)
 
-	versioned := updateAndPublishEntry(t, env, entryID, revision, map[string]any{"title": "New dev title"})
-	_ = versioned
+	updateAndPublishEntry(t, env, entryID, revision, map[string]any{"title": "New dev title"})
 	second := saveAndPublishSnapshot(t, env, singlePageConfig(key, "1.0.0"), "second")
-	if second["id"] == firstID {
-		t.Fatal("different content must create a different immutable snapshot")
+	if second["id"] != firstID {
+		t.Fatalf("content-only changes must reuse the same immutable site snapshot, got %v", second)
 	}
 	devPlacement := runtimePlacement(t, env, env.devServer.URL, "/")
 	if got := devPlacement["content"].(map[string]any)["title"]; got != "New dev title" {
-		t.Fatalf("dev snapshot should pin latest content, got %v", got)
+		t.Fatalf("dev runtime should read the latest dev content independently of its snapshot, got %v", got)
 	}
 	prodPlacement := runtimePlacement(t, env, env.prodServer.URL, "/")
 	if got := prodPlacement["content"].(map[string]any)["title"]; got != "Pinned title" {
-		t.Fatalf("prod must keep the same promoted snapshot after a later dev publish, got %v", got)
+		t.Fatalf("prod content should remain unchanged until separately promoted, got %v", got)
 	}
 
 	status, rollback, _ := env.request(http.MethodPost, "/api/v2/admin/site/snapshots/"+firstID+"/rollback", env.adminToken, map[string]any{"environment": "dev"})
@@ -215,17 +220,20 @@ func TestFeatureBuildSnapshotPinsContentAndPromotesSameSnapshot(t *testing.T) {
 		t.Fatalf("rollback dev snapshot: status=%d body=%v", status, rollback)
 	}
 	devPlacement = runtimePlacement(t, env, env.devServer.URL, "/")
-	if got := devPlacement["content"].(map[string]any)["title"]; got != "Pinned title" {
-		t.Fatalf("rollback should restore old content, got %v", got)
+	if got := devPlacement["content"].(map[string]any)["title"]; got != "New dev title" {
+		t.Fatalf("snapshot rollback must not roll back independently published content, got %v", got)
+	}
+	var snapshotContentCount int
+	if err := env.pool.QueryRow(context.Background(), `SELECT count(*) FROM site_snapshot_content WHERE snapshot_id=$1`, uuid.MustParse(firstID)).Scan(&snapshotContentCount); err != nil {
+		t.Fatal(err)
+	}
+	if snapshotContentCount != 0 {
+		t.Fatalf("new snapshots must not capture editorial records, found %d", snapshotContentCount)
 	}
 
 	_, err := env.pool.Exec(context.Background(), `UPDATE site_snapshots SET name='tampered' WHERE id=$1`, uuid.MustParse(firstID))
 	if err == nil || !strings.Contains(err.Error(), "immutable") {
 		t.Fatalf("snapshot update should be rejected by the database, got %v", err)
-	}
-	_, err = env.pool.Exec(context.Background(), `UPDATE site_snapshot_content SET data='{}'::jsonb WHERE snapshot_id=$1`, uuid.MustParse(firstID))
-	if err == nil || !strings.Contains(err.Error(), "immutable") {
-		t.Fatalf("snapshot content update should be rejected by the database, got %v", err)
 	}
 	_, err = env.pool.Exec(context.Background(), `UPDATE feature_builds SET digest=repeat('0',64) WHERE id=$1`, uuid.MustParse(build["id"].(string)))
 	if err == nil || !strings.Contains(err.Error(), "immutable") {
