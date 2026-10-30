@@ -1,7 +1,6 @@
 package releases
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -244,9 +243,6 @@ func nullable(s string) any {
 	return s
 }
 
-var _ = json.RawMessage{}
-var _ = errors.New
-
 func (h *Handler) SyncSource(w http.ResponseWriter, r *http.Request) {
 	actor, _ := principal.FromContext(r.Context())
 	id, err := uuid.Parse(r.PathValue("id"))
@@ -315,18 +311,10 @@ func (h *Handler) ListReleasesForSource(w http.ResponseWriter, r *http.Request) 
 		response.Error(w, r, http.StatusNotFound, "not_found", "Источник не найден")
 		return
 	}
-	p := h.provider()
-	pr, err := p.ForSource(*src)
-	if err != nil {
-		h.writeError(w, r, err)
-		return
-	}
-	rels, err := pr.ListReleases(r.Context(), src.RepoURL, 20)
+	rels, err := h.service.ListSourceReleases(r.Context(), *src, 20)
 	if err != nil {
 		h.writeError(w, r, err)
 		return
 	}
 	response.JSON(w, http.StatusOK, map[string]any{"items": rels})
 }
-
-func (h *Handler) provider() *releases.Provider { return releases.NewProvider() }

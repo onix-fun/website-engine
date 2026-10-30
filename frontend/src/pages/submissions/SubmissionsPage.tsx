@@ -39,7 +39,7 @@ import {
 } from "@/components/common/page";
 import { SubmissionStatusBadge } from "@/components/common/status-badges";
 import { useConfirm } from "@/components/common/confirm";
-import { parsedSchema } from "@/domains/schema-builder/schema";
+import { parsedSchema } from "@/domains/content-schema/schema";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input, Label } from "@/components/ui/input";
@@ -443,13 +443,13 @@ export default function SubmissionsPage() {
         <EmptyState
           icon={Inbox}
           title="Выберите форму"
-          description="Заявки хранятся по форме. Выберите форму в фильтре, чтобы увидеть отправки."
+          description="Заявки доступны для form-фич, загруженных из feature-сборок. Выберите форму в фильтре, чтобы увидеть отправки."
           action={
             formsQuery.isLoading ? (
               <Skeleton className="h-9 w-40" />
             ) : forms.length === 0 ? (
               <Button asChild variant="outline">
-                <Link to="/features/new">Создать Feature формы</Link>
+                <Link to="/site">Загрузить form-сборку</Link>
               </Button>
             ) : undefined
           }

@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -171,5 +172,109 @@ func TestProviderHooksRestore(t *testing.T) {
 	restore()
 	if testClient != nil || len(testAllowedHosts) != 0 || testInsecureOK || testAPIBase != "" {
 		t.Fatal("test hooks were not restored")
+	}
+}
+
+func TestCredentialedProvidersAuthenticateListingAndSameHostAsset(t *testing.T) {
+	var srv *httptest.Server
+	listingAuth := map[string]string{}
+	var downloadAuth string
+	mux := http.NewServeMux()
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Path == "/private.zip" {
+			downloadAuth = r.Header.Get("Authorization") + "|" + r.Header.Get("PRIVATE-TOKEN")
+			_, _ = w.Write([]byte("private archive"))
+			return
+		}
+		var authHeader string
+		switch {
+		case strings.HasPrefix(r.URL.Path, "/repos/"):
+			authHeader = "Authorization"
+			listingAuth["github"] = r.Header.Get(authHeader)
+			_ = json.NewEncoder(w).Encode([]map[string]any{{"tag_name": "v1", "assets": []map[string]any{{
+				"name": "site.zip", "browser_download_url": srv.URL + "/private.zip",
+			}}}})
+		case strings.HasPrefix(r.URL.Path, "/api/v4/"):
+			authHeader = "PRIVATE-TOKEN"
+			listingAuth["gitlab"] = r.Header.Get(authHeader)
+			_ = json.NewEncoder(w).Encode([]map[string]any{{"tag_name": "v1", "assets": map[string]any{"links": []map[string]any{{
+				"name": "site.zip", "direct_asset_url": srv.URL + "/private.zip",
+			}}}}})
+		default:
+			authHeader = "Authorization"
+			listingAuth["gitea"] = r.Header.Get(authHeader)
+			_ = json.NewEncoder(w).Encode([]map[string]any{{"tag_name": "v1", "assets": []map[string]any{{
+				"name": "site.zip", "browser_download_url": srv.URL + "/private.zip",
+			}}}})
+		}
+	})
+	srv = httptest.NewTLSServer(mux)
+	t.Cleanup(srv.Close)
+	restore := UseTestClient(srv.Client(), []string{"127.0.0.1"}, false, srv.URL)
+	defer restore()
+
+	cases := []struct {
+		name         string
+		provider     CredentialedProvider
+		path         string
+		wantAuth     string
+		wantDownload string
+	}{
+		{name: "github", provider: NewGitHub(), path: "/owner/repo", wantAuth: "Bearer test-token", wantDownload: "Bearer test-token|"},
+		{name: "gitlab", provider: NewGitLab(), path: "/group/project", wantAuth: "test-token", wantDownload: "|test-token"},
+		{name: "gitea", provider: NewGitea(), path: "/owner/repo", wantAuth: "token test-token", wantDownload: "token test-token|"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			list, err := tc.provider.ListReleasesWithToken(context.Background(), srv.URL+tc.path, 5, "test-token")
+			if err != nil {
+				t.Fatalf("list releases: %v", err)
+			}
+			if len(list) != 1 || len(list[0].Assets) != 1 {
+				t.Fatalf("unexpected release response: %+v", list)
+			}
+			if got := listingAuth[tc.name]; got != tc.wantAuth {
+				t.Fatalf("listing auth header = %q, want %q", got, tc.wantAuth)
+			}
+			body, _, err := tc.provider.DownloadAssetWithToken(context.Background(), srv.URL+tc.path, list[0].Assets[0].BrowserDownloadURL, "test-token")
+			if err != nil {
+				t.Fatalf("download asset: %v", err)
+			}
+			if err := body.Close(); err != nil {
+				t.Fatalf("close asset body: %v", err)
+			}
+			if downloadAuth != tc.wantDownload {
+				t.Fatalf("download auth headers = %q, want %q", downloadAuth, tc.wantDownload)
+			}
+		})
+	}
+}
+
+func TestTokenForAssetDoesNotForwardAcrossHosts(t *testing.T) {
+	if got := tokenForAsset("https://github.com/owner/repo", "https://release-assets.githubusercontent.com/file.zip", "secret"); got != "" {
+		t.Fatalf("cross-host asset received credential %q", got)
+	}
+	if got := tokenForAsset("https://gitlab.example/group/project", "https://gitlab.example/group/project/file.zip", "secret"); got != "secret" {
+		t.Fatalf("same-host asset token = %q", got)
+	}
+	for _, assetURL := range []string{
+		"https://gitlab.example:8443/group/project/file.zip",
+		"http://gitlab.example/group/project/file.zip",
+	} {
+		if got := tokenForAsset("https://gitlab.example/group/project", assetURL, "secret"); got != "" {
+			t.Errorf("credential forwarded to unsafe asset URL %q", assetURL)
+		}
+	}
+	if got := tokenForAsset("http://gitlab.example/group/project", "http://gitlab.example/group/project/file.zip", "secret"); got != "" {
+		t.Fatalf("credential forwarded over HTTP: %q", got)
+	}
+	request, err := http.NewRequest(http.MethodGet, "http://gitlab.example/api", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	setProviderToken(request, "gitlab", "secret")
+	if request.Header.Get("PRIVATE-TOKEN") != "" {
+		t.Fatal("credential forwarded to an HTTP provider API")
 	}
 }

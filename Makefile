@@ -1,4 +1,4 @@
-.PHONY: build test test-integration fmt vet compose-up compose-down
+.PHONY: build test test-integration fmt vet pull compose-up compose-down
 
 build:
 	go build ./...
@@ -16,8 +16,11 @@ test-integration:
 	@test -n "$$TEST_DATABASE_URL" || (echo "Set TEST_DATABASE_URL to a disposable PostgreSQL database" && exit 1)
 	go test -v ./cmd/integration
 
-compose-up:
-	docker compose up --build
+pull:
+	docker compose pull server
+
+compose-up: pull
+	docker compose up -d --no-build
 
 compose-down:
 	docker compose down

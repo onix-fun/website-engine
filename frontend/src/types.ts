@@ -289,8 +289,8 @@ export interface SettingsLimits {
 }
 
 export interface SettingsPublicAPI {
-  content_path: string;
-  entries_path: string;
+	runtime_path: string;
+	collection_path: string;
   forms_path: string;
   admin_path: string;
   media_path: string;
@@ -325,19 +325,85 @@ export interface Settings {
 }
 
 
-export interface SiteRelease {
-  id: string;
+export interface FeatureManifest {
+  formatVersion: number;
+  key: string;
+  name: string;
   version: string;
-  source_id?: string | null;
-  external_id?: string | null;
-  tag?: string | null;
-  commit_sha?: string | null;
-  artifact_sha256: string;
-  artifact_size: number;
-  manifest: JsonObject;
-  imported_by?: string | null;
-  created_at: string;
-  updated_at: string;
+  engineApi: string;
+  entry: string;
+  styles?: string[];
+  sharedStyles?: string[];
+  slots: string[];
+  arguments: JsonObject;
+  content: { mode: FeatureType; schema: JsonObject };
+}
+
+export interface FeatureBuild {
+  id: string;
+  featureId: string;
+  key: string;
+  name: string;
+  version: string;
+  schemaVersionId: string;
+  digest: string;
+  artifactSize: number;
+  manifest: FeatureManifest;
+  createdAt: string;
+}
+
+export interface FeatureArgumentBinding {
+  source: "literal" | "route";
+  value?: JsonValue;
+  routeArg?: string;
+}
+
+export interface SitePlacement {
+  id: string;
+  build: { featureKey: string; version: string };
+  slot: string;
+  arguments?: Record<string, FeatureArgumentBinding>;
+  collectionSource?: { featureKey: string; version: string; field: string; argument: string };
+  detailLink?: { routeId: string; field: string; pathTemplate: string };
+}
+
+export interface SitePage {
+  id: string;
+  name: string;
+  kind: "page" | "collection-list" | "detail";
+  placements: SitePlacement[];
+}
+
+export interface SiteRoute {
+  id: string;
+  pattern: string;
+  pageId: string;
+}
+
+export interface SiteConfig {
+  formatVersion: 1;
+  documentTitle?: string;
+  pages: SitePage[];
+  routes: SiteRoute[];
+}
+
+export interface SiteDraftState {
+  revision: number;
+  config: SiteConfig;
+  updatedAt: string;
+}
+
+export interface SiteSnapshot {
+  id: string;
+  sequence: number;
+  name: string;
+  digest: string;
+  createdAt: string;
+}
+
+export interface SiteSnapshotList {
+  items: SiteSnapshot[];
+  active: Record<Environment, string>;
 }
 
 export interface EnvironmentPatch {
@@ -349,26 +415,6 @@ export interface EnvironmentPatch {
   tls_enabled?: boolean;
 }
 
-export interface RemoteReleaseAsset {
-  name: string;
-  browser_download_url: string;
-  size: number;
-}
-
-export interface RemoteRelease {
-  tag_name: string;
-  published_at?: string;
-  assets: RemoteReleaseAsset[];
-}
-
-export interface NewReleaseSourceInput {
-  provider: ReleaseSource["provider"];
-  repo_url: string;
-  asset_pattern: string;
-  token?: string;
-  is_enabled?: boolean;
-}
-
 export interface SiteEnvironment {
   key: Environment;
   name: string;
@@ -377,19 +423,7 @@ export interface SiteEnvironment {
   http_port: number;
   tls_enabled: boolean;
   cors_origins: string[];
-  active_release_id?: string | null;
+  active_snapshot_id?: string | null;
   revision: number;
-  updated_at: string;
-}
-
-export interface ReleaseSource {
-  id: string;
-  provider: "manual" | "github" | "gitlab" | "gitea";
-  repo_url: string;
-  asset_pattern: string;
-  is_enabled: boolean;
-  has_credential: boolean;
-  created_by?: string | null;
-  created_at: string;
   updated_at: string;
 }

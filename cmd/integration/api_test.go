@@ -29,11 +29,11 @@ import (
 	"websiteengine/features/overview"
 	"websiteengine/features/releases"
 	"websiteengine/features/settings"
+	"websiteengine/features/sitebuilder"
 	"websiteengine/migrations"
 	"websiteengine/pkg/environment"
 	"websiteengine/pkg/postgres"
 	"websiteengine/pkg/secrets"
-	"websiteengine/pkg/site"
 	"websiteengine/pkg/storage"
 	httptransport "websiteengine/presentation/http"
 	hauth "websiteengine/presentation/http/handlers/auth"
@@ -45,6 +45,7 @@ import (
 	hpublication "websiteengine/presentation/http/handlers/publication"
 	hreleases "websiteengine/presentation/http/handlers/releases"
 	hsettings "websiteengine/presentation/http/handlers/settings"
+	hsitebuilder "websiteengine/presentation/http/handlers/sitebuilder"
 )
 
 const testAdminToken = "test-admin-token-at-least-24-characters"
@@ -103,9 +104,6 @@ type testEnv struct {
 	releases   *releases.Service
 }
 
-const testDevPublicURL = "https://dev.example.test"
-const testProdPublicURL = "https://example.test"
-
 func newTestEnv(t *testing.T) *testEnv {
 	t.Helper()
 	dbURL := os.Getenv("TEST_DATABASE_URL")
@@ -121,7 +119,8 @@ func newTestEnv(t *testing.T) *testEnv {
 	if err := postgres.Migrate(ctx, pool, migrations.FS); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
-	if _, err := pool.Exec(ctx, `TRUNCATE media_objects, form_submissions, feature_entry_versions,
+	if _, err := pool.Exec(ctx, `TRUNCATE site_snapshot_content, site_snapshot_events, site_snapshots,
+		site_draft_config, feature_builds, media_objects, form_submissions, feature_entry_versions,
 		feature_entries, feature_versions, features, access_tokens, content_publication_events,
 		release_events, site_releases, site_environments, release_sources, site_settings
 		RESTART IDENTITY CASCADE`); err != nil {
@@ -145,6 +144,8 @@ func newTestEnv(t *testing.T) *testEnv {
 	formsRepo := forms.NewRepository(pool)
 	formsService := forms.NewService(formsRepo, featureRepo)
 	store := newFakeStore()
+	buildService := sitebuilder.NewBuildService(pool, store, 8<<20)
+	snapshotService := sitebuilder.NewSnapshotService(pool, buildService)
 	mediaRepo := media.NewRepository(pool)
 	mediaService := media.NewService(mediaRepo, store, 20<<20)
 
@@ -175,21 +176,21 @@ func newTestEnv(t *testing.T) *testEnv {
 		Releases:          releaseHandler,
 		PublicationEvents: hpublication.NewHandler(pool, log),
 		Settings:          hsettings.NewHandler(settingsService),
-		Site:              site.NewManager(site.NewRepository(pool), store, t.TempDir()),
+		FeatureBuilds:     hsitebuilder.NewBuildsHandler(buildService, log, 8<<20),
+		SiteSnapshots:     hsitebuilder.NewSnapshotsHandler(snapshotService, formsService, log, 1<<20),
 		CorsResolver:      releaseService.Cors(),
 		Health:            func(context.Context) error { return nil },
 		MaxJSONBytes:      1 << 20,
 		FormRateLimit:     10000,
 		FormRateWindow:    time.Minute,
 		PublicCORSOrigins: []string{"https://site.example"},
-		ProdPublicBaseURL: testProdPublicURL,
 	}
 
 	server := httptest.NewServer(httptransport.NewRouter(deps))
 	t.Cleanup(server.Close)
-	devServer := httptest.NewServer(httptransport.NewPublicRouter(deps, environment.Dev, testDevPublicURL))
+	devServer := httptest.NewServer(httptransport.NewPublicRouter(deps, environment.Dev))
 	t.Cleanup(devServer.Close)
-	prodServer := httptest.NewServer(httptransport.NewPublicRouter(deps, environment.Prod, testProdPublicURL))
+	prodServer := httptest.NewServer(httptransport.NewPublicRouter(deps, environment.Prod))
 	t.Cleanup(prodServer.Close)
 	return &testEnv{t: t, pool: pool, server: server, devServer: devServer, prodServer: prodServer,
 		adminToken: testAdminToken, store: store, releases: releaseService}
@@ -318,8 +319,15 @@ func TestFeaturesContentAndAuthorization(t *testing.T) {
 
 	status, body, _ = env.request(http.MethodPost, "/api/v1/admin/features/"+featureID+"/entries", env.adminToken,
 		map[string]any{"data": map[string]any{"secret": "leak"}})
+	if status != http.StatusCreated {
+		t.Fatalf("incomplete draft should be saved for later editing: %d %v", status, body)
+	}
+	invalidEntryID := body["id"].(string)
+	invalidRevision := body["revision"].(float64)
+	status, body, _ = env.request(http.MethodPost, "/api/v1/admin/entries/"+invalidEntryID+"/publish", env.adminToken,
+		map[string]any{"revision": invalidRevision})
 	if status != http.StatusUnprocessableEntity {
-		t.Fatalf("invalid entry must be 422: %d %v", status, body)
+		t.Fatalf("invalid draft must fail validation before publishing: %d %v", status, body)
 	}
 	status, body, _ = env.request(http.MethodPost, "/api/v1/admin/features/"+featureID+"/entries", env.adminToken,
 		map[string]any{"data": map[string]any{"title": "Разработка сайта", "secret": "hidden"}})

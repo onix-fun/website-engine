@@ -36,6 +36,10 @@ type ghAsset struct {
 }
 
 func (g *GitHub) ListReleases(ctx context.Context, repoURL string, limit int) ([]Release, error) {
+	return g.ListReleasesWithToken(ctx, repoURL, limit, "")
+}
+
+func (g *GitHub) ListReleasesWithToken(ctx context.Context, repoURL string, limit int, token string) ([]Release, error) {
 	owner, repo, err := parseRepo(repoURL)
 	if err != nil {
 		return nil, err
@@ -54,6 +58,7 @@ func (g *GitHub) ListReleases(ctx context.Context, repoURL string, limit int) ([
 	}
 	req.Header.Set("Accept", "application/vnd.github+json")
 	req.Header.Set("User-Agent", "website-engine")
+	setProviderToken(req, "github", token)
 	resp, err := g.client.Do(req)
 	if err != nil {
 		return nil, err
@@ -80,6 +85,10 @@ func (g *GitHub) ListReleases(ctx context.Context, repoURL string, limit int) ([
 }
 
 func (g *GitHub) DownloadAsset(ctx context.Context, downloadURL string) (io.ReadCloser, int64, error) {
+	return g.DownloadAssetWithToken(ctx, "", downloadURL, "")
+}
+
+func (g *GitHub) DownloadAssetWithToken(ctx context.Context, repoURL, downloadURL, token string) (io.ReadCloser, int64, error) {
 	u, err := url.Parse(downloadURL)
 	if err != nil {
 		return nil, 0, err
@@ -96,6 +105,7 @@ func (g *GitHub) DownloadAsset(ctx context.Context, downloadURL string) (io.Read
 	}
 	req.Header.Set("Accept", "application/octet-stream")
 	req.Header.Set("User-Agent", "website-engine")
+	setProviderToken(req, "github", tokenForAsset(repoURL, downloadURL, token))
 	resp, err := g.client.Do(req)
 	if err != nil {
 		return nil, 0, err

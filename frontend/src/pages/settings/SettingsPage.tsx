@@ -1,13 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
-import {
-  Globe2,
-  HardDrive,
-  Lock,
-  RefreshCw,
-  Settings2,
-  ShieldCheck,
-} from "lucide-react";
+import { Globe2, HardDrive, Lock, RefreshCw, Settings2, ShieldCheck } from "lucide-react";
 import { api } from "@/api";
 import {
   ErrorState,
@@ -102,16 +95,24 @@ export default function SettingsPage() {
     <div className="page-grid">
       <PageHeader
         title="Настройки"
-        description="Действующие ограничения, публичные адреса API и параметры медиа. Значения доступны только для чтения."
+        description="Настройки движка, API, медиа и доменов сайта."
         actions={
-          <Button
-            variant="outline"
-            onClick={() => void settingsQuery.refetch()}
-            loading={settingsQuery.isFetching}
-          >
-            <RefreshCw />
-            Обновить
-          </Button>
+          <div className="flex flex-wrap gap-2">
+            <Button variant="outline" asChild>
+              <Link to="/settings/environments/dev">Среда dev</Link>
+            </Button>
+            <Button variant="outline" asChild>
+              <Link to="/settings/environments/prod">Среда prod</Link>
+            </Button>
+            <Button
+              variant="outline"
+              onClick={() => void settingsQuery.refetch()}
+              loading={settingsQuery.isFetching}
+            >
+              <RefreshCw />
+              Обновить
+            </Button>
+          </div>
         }
       />
 
@@ -180,11 +181,15 @@ export default function SettingsPage() {
           </CardHeader>
           <CardContent>
             <div className="divide-y divide-border">
-              <PathRow label="Контент" value={public_api.content_path} />
               <PathRow
-                label="Записи"
-                value={public_api.entries_path}
-                hint="Подставьте ключ Feature вместо {key}"
+                label="Композиция страницы"
+                value={public_api.runtime_path}
+                hint="Замените {path} на запрашиваемый путь сайта"
+              />
+              <PathRow
+                label="Коллекции"
+                value={public_api.collection_path}
+                hint="Фильтрация и постраничное чтение выполняются на сервере"
               />
               <PathRow
                 label="Заявки форм"

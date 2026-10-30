@@ -6,3 +6,5 @@ frontend/node_modules/
 .pnpm-store/
 frontend/dist/
 pkg/static/dist/assets/
+pkg/runtime/dist/*
+!pkg/runtime/dist/.gitkeep

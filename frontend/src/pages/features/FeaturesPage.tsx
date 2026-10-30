@@ -14,7 +14,6 @@ import {
   Plus,
   RotateCcw,
   Search,
-  Settings2,
   X,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -32,7 +31,6 @@ import {
 import {
   FeatureStatusBadge,
   FeatureTypeBadge,
-  SchemaStateBadge,
 } from "@/components/common/status-badges";
 import { useConfirm } from "@/components/common/confirm";
 import { Badge } from "@/components/ui/badge";
@@ -55,7 +53,6 @@ import {
 import { Skeleton } from "@/components/ui/misc";
 import { featureStatusLabels, featureTypeLabels, formatDateTime } from "@/lib/format";
 
-type SchemaFilter = "all" | "draft" | "published" | "none";
 type SortOption = "updated_desc" | "updated_asc" | "name_asc" | "name_desc";
 
 const statusOptions: Array<{ value: FeatureStatus | "all"; label: string }> = [
@@ -68,7 +65,6 @@ function useFeatureFilterParams() {
   const [searchParams, setSearchParams] = useSearchParams();
   const status = (searchParams.get("status") ?? "active") as FeatureStatus | "all";
   const type = (searchParams.get("type") ?? "all") as FeatureType | "all";
-  const schema = (searchParams.get("schema") ?? "all") as SchemaFilter;
   const sort = (searchParams.get("sort") ?? "updated_desc") as SortOption;
   const q = searchParams.get("q") ?? "";
 
@@ -94,7 +90,7 @@ function useFeatureFilterParams() {
     );
   };
 
-  return { status, type, schema, sort, q, update };
+  return { status, type, sort, q, update };
 }
 
 function FeatureActions({ feature }: { feature: Feature }) {
@@ -104,19 +100,19 @@ function FeatureActions({ feature }: { feature: Feature }) {
   const archiveMutation = useMutation({
     mutationFn: () => api.features.archive(feature.id),
     onSuccess: () => {
-      toast.success(`Feature «${feature.name}» архивирована`);
+      toast.success(`Раздел «${feature.name}» перемещён в архив`);
       void queryClient.invalidateQueries({ queryKey: queryKeys.features.all });
       void queryClient.invalidateQueries({ queryKey: queryKeys.overview });
     },
-    onError: (error) => toast.error(error instanceof Error ? error.message : "Не удалось архивировать Feature"),
+    onError: (error) => toast.error(error instanceof Error ? error.message : "Не удалось архивировать раздел"),
   });
 
   const requestArchive = async () => {
     const confirmed = await confirm({
-      title: "Архивировать Feature?",
+      title: "Архивировать раздел?",
       description: (
         <>
-          Feature <strong>«{feature.name}»</strong> станет архивной. Редактирование
+          Раздел <strong>«{feature.name}»</strong> будет перемещён в архив. Редактирование
           и публикация будут заблокированы. Вернуть её из архива через интерфейс
           нельзя.
         </>
@@ -135,12 +131,6 @@ function FeatureActions({ feature }: { feature: Feature }) {
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-52">
-        <DropdownMenuItem asChild>
-          <Link to={`/features/${feature.id}/schema`}>
-            <Settings2 className="h-4 w-4" />
-            Открыть схему
-          </Link>
-        </DropdownMenuItem>
         {feature.type !== "form" && (
           <DropdownMenuItem asChild>
             <Link to={`/features/${feature.id}/content`}>
@@ -157,12 +147,6 @@ function FeatureActions({ feature }: { feature: Feature }) {
             </Link>
           </DropdownMenuItem>
         )}
-        <DropdownMenuItem asChild>
-          <Link to={`/features/${feature.id}/settings`}>
-            <Settings2 className="h-4 w-4" />
-            Настройки
-          </Link>
-        </DropdownMenuItem>
         {feature.status === "active" && (
           <>
             <DropdownMenuSeparator />
@@ -188,7 +172,7 @@ function FeatureRow({ feature }: { feature: Feature }) {
         <td>
           <div className="min-w-0">
             <Link
-              to={`/features/${feature.id}/schema`}
+              to={`/features/${feature.id}/content`}
               className="block truncate text-sm font-medium hover:text-primary"
             >
               {feature.name}
@@ -202,9 +186,6 @@ function FeatureRow({ feature }: { feature: Feature }) {
           <FeatureTypeBadge type={feature.type} />
         </td>
         <td>
-          <SchemaStateBadge feature={feature} />
-        </td>
-        <td>
           <FeatureStatusBadge status={feature.status} />
         </td>
         <td className="text-xs text-muted-foreground">
@@ -213,7 +194,7 @@ function FeatureRow({ feature }: { feature: Feature }) {
         <td>
           <div className="flex items-center justify-end gap-1">
             <Button variant="ghost" size="sm" asChild>
-              <Link to={`/features/${feature.id}/schema`}>
+              <Link to={`/features/${feature.id}/content`}>
                 Открыть
                 <ArrowRight />
               </Link>
@@ -232,7 +213,7 @@ function FeatureCard({ feature }: { feature: Feature }) {
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0">
           <Link
-            to={`/features/${feature.id}/schema`}
+            to={`/features/${feature.id}/content`}
             className="block truncate text-sm font-semibold hover:text-primary"
           >
             {feature.name}
@@ -246,14 +227,13 @@ function FeatureCard({ feature }: { feature: Feature }) {
       <div className="mt-3 flex flex-wrap gap-1.5">
         <FeatureTypeBadge type={feature.type} />
         <FeatureStatusBadge status={feature.status} />
-        <SchemaStateBadge feature={feature} />
       </div>
       <div className="mt-3 flex items-center justify-between border-t border-border pt-3">
         <span className="text-2xs text-muted-foreground">
           {formatDateTime(feature.updated_at)}
         </span>
         <Button variant="ghost" size="sm" asChild>
-          <Link to={`/features/${feature.id}/schema`}>Открыть</Link>
+          <Link to={`/features/${feature.id}/content`}>Открыть</Link>
         </Button>
       </div>
     </div>
@@ -261,8 +241,8 @@ function FeatureCard({ feature }: { feature: Feature }) {
 }
 
 export default function FeaturesPage() {
-  useDocumentTitle("Features");
-  const { status, type, schema, sort, q, update } = useFeatureFilterParams();
+  useDocumentTitle("Фичи");
+  const { status, type, sort, q, update } = useFeatureFilterParams();
   const [searchInput, setSearchInput] = useState(q);
   const debouncedSearch = useDebouncedValue(searchInput, 250);
 
@@ -302,11 +282,6 @@ export default function FeaturesPage() {
     const query = q.trim().toLowerCase();
     const list = loadedFeatures.filter((feature) => {
       if (type !== "all" && feature.type !== type) return false;
-      if (schema === "draft" && !feature.draft_version_id) return false;
-      if (schema === "published" && !feature.prod_version_id) return false;
-      if (schema === "none" && (feature.draft_version_id || feature.prod_version_id)) {
-        return false;
-      }
       if (query && !`${feature.name} ${feature.key}`.toLowerCase().includes(query)) {
         return false;
       }
@@ -320,30 +295,30 @@ export default function FeaturesPage() {
       }
       return new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime();
     });
-  }, [loadedFeatures, q, schema, sort, type]);
+  }, [loadedFeatures, q, sort, type]);
 
   const filtersActive =
-    Boolean(q) || type !== "all" || schema !== "all" || sort !== "updated_desc" || status !== "active";
+    Boolean(q) || type !== "all" || sort !== "updated_desc" || status !== "active";
 
   const resetFilters = () => {
     setSearchInput("");
-    update({ q: null, type: null, schema: null, sort: null, status: null });
+    update({ q: null, type: null, sort: null, status: null });
   };
 
   return (
     <div className="page-grid">
       <PageHeader
-        title="Features"
-        description="Каталог ресурсов CMS. Search и фильтры по типу, состоянию схемы и сортировке применяются к уже загруженным страницам — серверная пагинация сохраняется."
+        title="Фичи"
+        description="Контентные модели, зарегистрированные из feature-манифестов. Состав сайта и версии сборок настраиваются в разделе «Сайт»."
         actions={
           <>
             <Button variant="outline" asChild>
               <Link to="/submissions">Заявки</Link>
             </Button>
             <Button asChild>
-              <Link to="/features/new">
+              <Link to="/site">
                 <Plus />
-                Создать Feature
+                Сборки фич и страницы
               </Link>
             </Button>
           </>
@@ -359,7 +334,7 @@ export default function FeaturesPage() {
               value={searchInput}
               onChange={(event) => setSearchInput(event.target.value)}
               placeholder="Поиск по названию и ключу"
-              aria-label="Поиск Features"
+              aria-label="Поиск разделов"
               className="pl-9 pr-9"
             />
             {searchInput && (
@@ -378,7 +353,7 @@ export default function FeaturesPage() {
               value={status}
               onValueChange={(value) => update({ status: value === "active" ? null : value })}
             >
-              <SelectTrigger className="w-full sm:w-36" aria-label="Статус Feature">
+              <SelectTrigger className="w-full sm:w-36" aria-label="Статус раздела">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -390,7 +365,7 @@ export default function FeaturesPage() {
               </SelectContent>
             </Select>
             <Select value={type} onValueChange={(value) => update({ type: value })}>
-              <SelectTrigger className="w-full sm:w-36" aria-label="Тип Feature">
+              <SelectTrigger className="w-full sm:w-36" aria-label="Тип раздела">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -400,17 +375,6 @@ export default function FeaturesPage() {
                     {featureTypeLabels[featureType]}
                   </SelectItem>
                 ))}
-              </SelectContent>
-            </Select>
-            <Select value={schema} onValueChange={(value) => update({ schema: value })}>
-              <SelectTrigger className="w-full sm:w-44" aria-label="Состояние схемы">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">Любая схема</SelectItem>
-                <SelectItem value="draft">Есть черновик</SelectItem>
-                <SelectItem value="published">Есть публикация</SelectItem>
-                <SelectItem value="none">Нет схемы</SelectItem>
               </SelectContent>
             </Select>
             <Select value={sort} onValueChange={(value) => update({ sort: value })}>
@@ -455,17 +419,17 @@ export default function FeaturesPage() {
       ) : featuresQuery.isError ? (
         <ErrorState
           error={featuresQuery.error}
-          title="Не удалось загрузить Features"
+          title="Не удалось загрузить разделы"
           onRetry={() => void featuresQuery.refetch()}
         />
       ) : loadedFeatures.length === 0 ? (
         <EmptyState
           icon={Layers}
-          title={filtersActive ? "Features не найдены" : "Пока нет ни одной Feature"}
+          title={filtersActive ? "Разделы не найдены" : "Пока нет ни одного раздела"}
           description={
             filtersActive
               ? "По выбранным условиям ничего нет. Сбросьте фильтры или измените запрос."
-              : "Создайте первую Feature, чтобы определить схему и начать работу с контентом."
+              : "Загрузите feature ZIP в разделе «Сайт». Новые контентные модели и формы появятся здесь автоматически из манифестов."
           }
           action={
             filtersActive ? (
@@ -475,9 +439,9 @@ export default function FeaturesPage() {
               </Button>
             ) : (
               <Button asChild>
-                <Link to="/features/new">
+                <Link to="/site">
                   <Plus />
-                  Создать Feature
+                  Загрузить сборки фич
                 </Link>
               </Button>
             )
@@ -487,7 +451,7 @@ export default function FeaturesPage() {
         <EmptyState
           icon={Search}
           title="Ничего не найдено"
-          description="Среди загруженных Features нет подходящих. Очистите поиск или загрузите следующую страницу."
+          description="Среди загруженных разделов нет подходящих. Очистите поиск или загрузите следующую страницу."
           action={
             <div className="flex flex-wrap justify-center gap-2">
               <Button variant="outline" onClick={resetFilters}>
@@ -509,7 +473,6 @@ export default function FeaturesPage() {
                 <tr>
                   <th scope="col">Название и ключ</th>
                   <th scope="col">Тип</th>
-                  <th scope="col">Схема</th>
                   <th scope="col">Статус</th>
                   <th scope="col">Изменена</th>
                   <th scope="col" className="text-right">
@@ -543,7 +506,7 @@ export default function FeaturesPage() {
               </Button>
             ) : (
               <p className="text-2xs text-muted-foreground">
-                Все загруженные Features показаны
+                Все загруженные разделы показаны
               </p>
             )}
             {status === "archived" && (

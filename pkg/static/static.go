@@ -49,7 +49,7 @@ func Handler() http.Handler {
 }
 
 func serveIndex(w http.ResponseWriter, r *http.Request, fsys fs.FS) {
-	data, err := fs.ReadFile(fsys, "index.html")
+	data, err := fs.ReadFile(fsys, "admin.html")
 	if err != nil {
 		http.Error(w, "admin UI is not built", http.StatusNotFound)
 		return

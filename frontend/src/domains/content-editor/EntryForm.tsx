@@ -10,7 +10,7 @@ import {
   X,
 } from "lucide-react";
 import type { JsonObject, JsonValue } from "@/types";
-import type { SchemaFieldNode } from "@/domains/schema-builder/types";
+import type { SchemaFieldNode } from "@/domains/content-schema/types";
 import { publicMediaPath } from "@/api";
 import { Button } from "@/components/ui/button";
 import { Input, Label, Textarea } from "@/components/ui/input";

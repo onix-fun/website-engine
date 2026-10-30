@@ -3,7 +3,7 @@
 FROM node:20-alpine AS web
 RUN corepack enable
 WORKDIR /src/frontend
-COPY frontend/package.json frontend/pnpm-lock.yaml ./
+COPY frontend/package.json frontend/pnpm-lock.yaml frontend/pnpm-workspace.yaml ./
 RUN pnpm install --frozen-lockfile
 COPY frontend/ ./
 RUN pnpm build
@@ -14,6 +14,7 @@ COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
 COPY --from=web /src/pkg/static/dist ./pkg/static/dist
+COPY --from=web /src/pkg/runtime/dist ./pkg/runtime/dist
 RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /out/server ./cmd/api
 
 FROM alpine:3.21

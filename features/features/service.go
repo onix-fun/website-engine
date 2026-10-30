@@ -60,10 +60,10 @@ func (s *Service) Create(ctx context.Context, actor principal.Principal, in Crea
 	in.Key = strings.TrimSpace(in.Key)
 	in.Name = strings.TrimSpace(in.Name)
 	if !keyPattern.MatchString(in.Key) {
-		return Detail{}, &ValidationError{Message: "key должен начинаться с латинской буквы и содержать только a-z, 0-9, _ и -"}
+		return Detail{}, &ValidationError{Message: "Ключ должен начинаться с латинской буквы и содержать только a-z, 0-9, _ и -"}
 	}
 	if in.Name == "" || utf8.RuneCountInString(in.Name) > 200 {
-		return Detail{}, &ValidationError{Message: "name должен содержать от 1 до 200 символов"}
+		return Detail{}, &ValidationError{Message: "Название должно содержать от 1 до 200 символов"}
 	}
 	switch in.Type {
 	case "collection", "single", "form":
@@ -157,7 +157,7 @@ func (s *Service) loadDetail(ctx context.Context, db DBTX, f Feature) (Detail, e
 func (s *Service) UpdateName(ctx context.Context, id uuid.UUID, name string) (Feature, error) {
 	name = strings.TrimSpace(name)
 	if name == "" || utf8.RuneCountInString(name) > 200 {
-		return Feature{}, &ValidationError{Message: "name должен содержать от 1 до 200 символов"}
+		return Feature{}, &ValidationError{Message: "Название должно содержать от 1 до 200 символов"}
 	}
 	f, err := s.repo.UpdateName(ctx, id, name)
 	return f, translateDBError(err)
@@ -206,7 +206,7 @@ func (s *Service) SaveDraft(ctx context.Context, actor principal.Principal, id u
 		return DraftState{}, err
 	}
 	if f.Status == "archived" {
-		return DraftState{}, &ConflictError{Message: "Нельзя изменять архивную Feature"}
+		return DraftState{}, &ConflictError{Message: "Нельзя изменять архивный раздел"}
 	}
 	if f.Revision != expectedRevision {
 		return DraftState{}, &ConflictError{Message: "Черновик уже был изменён. Перезагрузите данные"}
@@ -265,7 +265,7 @@ func (s *Service) Publish(ctx context.Context, actor principal.Principal, id uui
 		return Detail{}, err
 	}
 	if f.Status == "archived" {
-		return Detail{}, &ConflictError{Message: "Нельзя публиковать архивную Feature"}
+		return Detail{}, &ConflictError{Message: "Нельзя публиковать архивный раздел"}
 	}
 	if f.Revision != expectedRevision {
 		return Detail{}, &ConflictError{Message: "Черновик уже был изменён. Перезагрузите данные"}
@@ -326,7 +326,7 @@ func (s *Service) Promote(ctx context.Context, actor principal.Principal, id uui
 		return Detail{}, err
 	}
 	if f.Status == "archived" {
-		return Detail{}, &ConflictError{Message: "Нельзя продвигать архивную Feature"}
+		return Detail{}, &ConflictError{Message: "Нельзя продвигать архивный раздел"}
 	}
 	if f.Revision != expectedRevision {
 		return Detail{}, &ConflictError{Message: "Черновик уже был изменён. Перезагрузите данные"}
@@ -457,7 +457,7 @@ func translateDBError(err error) error {
 	if errors.As(err, &pgErr) {
 		switch pgErr.Code {
 		case "23505":
-			return &ConflictError{Message: "Feature с таким key уже существует или версия конфликтует"}
+			return &ConflictError{Message: "Раздел с таким ключом уже существует или версия конфликтует"}
 		case "23000", "23503", "23514", "22P02":
 			return &ConflictError{Message: "Операция нарушает целостность данных"}
 		}

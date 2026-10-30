@@ -241,6 +241,14 @@ func (s *Service) CreateSource(ctx context.Context, actor principal.Principal, i
 		if !strings.HasPrefix(in.RepoURL, "https://") && !strings.HasPrefix(in.RepoURL, "http://") {
 			return Source{}, errors.New("repo_url must be an absolute https URL")
 		}
+		if strings.HasPrefix(in.RepoURL, "http://") && strings.TrimSpace(in.Token) != "" {
+			return Source{}, errors.New("Токен нельзя использовать с незашифрованным HTTP-источником")
+		}
+	}
+	if pattern := strings.TrimSpace(in.AssetPattern); pattern != "" {
+		if _, err := regexp.Compile(pattern); err != nil {
+			return Source{}, errors.New("Шаблон имени артефакта должен быть корректным регулярным выражением")
+		}
 	}
 	var ciphertext, nonce []byte
 	var err error
@@ -267,6 +275,35 @@ func (s *Service) CreateSource(ctx context.Context, actor principal.Principal, i
 
 func (s *Service) DeleteSource(ctx context.Context, id uuid.UUID) error {
 	return s.repo.DeleteSource(ctx, id)
+}
+
+func (s *Service) sourceToken(ctx context.Context, id uuid.UUID) (string, error) {
+	ciphertext, nonce, err := s.repo.SourceCredential(ctx, id)
+	if err != nil || len(ciphertext) == 0 {
+		return "", err
+	}
+	if s.box == nil {
+		return "", errors.New("release credential decryption is not configured")
+	}
+	return s.box.Decrypt(ciphertext, nonce)
+}
+
+func (s *Service) ListSourceReleases(ctx context.Context, src Source, limit int) ([]releaseprovider.Release, error) {
+	if !src.Enabled {
+		return nil, errors.New("release source is disabled")
+	}
+	p, err := s.Provider().ForSource(src)
+	if err != nil {
+		return nil, err
+	}
+	token, err := s.sourceToken(ctx, src.ID)
+	if err != nil {
+		return nil, err
+	}
+	if credentialed, ok := p.(releaseprovider.CredentialedProvider); ok {
+		return credentialed.ListReleasesWithToken(ctx, src.RepoURL, limit, token)
+	}
+	return p.ListReleases(ctx, src.RepoURL, limit)
 }
 
 func encodeCursor(t time.Time, id uuid.UUID) string {
@@ -349,11 +386,23 @@ func (p *Provider) ForSource(src Source) (releaseprovider.Provider, error) {
 }
 
 func (s *Service) SyncFromSource(ctx context.Context, actor principal.Principal, src Source, assetURL, version, tag string) (Release, error) {
+	if !src.Enabled {
+		return Release{}, errors.New("release source is disabled")
+	}
 	p, err := s.Provider().ForSource(src)
 	if err != nil {
 		return Release{}, err
 	}
-	body, _, err := p.DownloadAsset(ctx, assetURL)
+	token, err := s.sourceToken(ctx, src.ID)
+	if err != nil {
+		return Release{}, err
+	}
+	var body io.ReadCloser
+	if credentialed, ok := p.(releaseprovider.CredentialedProvider); ok {
+		body, _, err = credentialed.DownloadAssetWithToken(ctx, src.RepoURL, assetURL, token)
+	} else {
+		body, _, err = p.DownloadAsset(ctx, assetURL)
+	}
 	if err != nil {
 		return Release{}, err
 	}

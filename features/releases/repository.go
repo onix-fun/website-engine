@@ -49,16 +49,17 @@ type Release struct {
 }
 
 type EnvironmentState struct {
-	Key             environment.Environment `json:"key"`
-	Name            string                  `json:"name"`
-	PublicBaseURL   string                  `json:"public_base_url"`
-	Domains         []string                `json:"domains"`
-	HTTPPort        int                     `json:"http_port"`
-	TLSEnabled      bool                    `json:"tls_enabled"`
-	CORSOrigins     []string                `json:"cors_origins"`
-	ActiveReleaseID *uuid.UUID              `json:"active_release_id,omitempty"`
-	Revision        int64                   `json:"revision"`
-	UpdatedAt       time.Time               `json:"updated_at"`
+	Key              environment.Environment `json:"key"`
+	Name             string                  `json:"name"`
+	PublicBaseURL    string                  `json:"public_base_url"`
+	Domains          []string                `json:"domains"`
+	HTTPPort         int                     `json:"http_port"`
+	TLSEnabled       bool                    `json:"tls_enabled"`
+	CORSOrigins      []string                `json:"cors_origins"`
+	ActiveReleaseID  *uuid.UUID              `json:"active_release_id,omitempty"`
+	ActiveSnapshotID *uuid.UUID              `json:"active_snapshot_id,omitempty"`
+	Revision         int64                   `json:"revision"`
+	UpdatedAt        time.Time               `json:"updated_at"`
 }
 
 type Event struct {
@@ -158,7 +159,7 @@ func (r *Repository) InsertEvent(ctx context.Context, event Event) error {
 func (r *Repository) Environments(ctx context.Context) ([]EnvironmentState, error) {
 	rows, err := r.pool.Query(ctx, `
 		SELECT key, name, public_base_url, domains, http_port, tls_enabled,
-		       cors_origins, active_release_id, revision, updated_at
+		       cors_origins, active_release_id, active_snapshot_id, revision, updated_at
 		  FROM site_environments ORDER BY key`)
 	if err != nil {
 		return nil, err
@@ -169,7 +170,7 @@ func (r *Repository) Environments(ctx context.Context) ([]EnvironmentState, erro
 		var e EnvironmentState
 		var key string
 		if err := rows.Scan(&key, &e.Name, &e.PublicBaseURL, &e.Domains, &e.HTTPPort, &e.TLSEnabled,
-			&e.CORSOrigins, &e.ActiveReleaseID, &e.Revision, &e.UpdatedAt); err != nil {
+			&e.CORSOrigins, &e.ActiveReleaseID, &e.ActiveSnapshotID, &e.Revision, &e.UpdatedAt); err != nil {
 			return nil, err
 		}
 		e.Key = environment.Environment(key)
@@ -256,6 +257,19 @@ func (r *Repository) ListSources(ctx context.Context) ([]Source, error) {
 		out = append(out, s)
 	}
 	return out, rows.Err()
+}
+
+// SourceCredential returns encrypted provider credentials for internal use.
+// The public Source model only exposes whether a credential is present.
+func (r *Repository) SourceCredential(ctx context.Context, id uuid.UUID) ([]byte, []byte, error) {
+	var ciphertext, nonce []byte
+	err := r.pool.QueryRow(ctx, `
+		SELECT auth_ciphertext, auth_nonce
+		  FROM release_sources WHERE id = $1`, id).Scan(&ciphertext, &nonce)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil, ErrNotFound
+	}
+	return ciphertext, nonce, err
 }
 
 func (r *Repository) InsertSource(ctx context.Context, s Source, ciphertext, nonce []byte) error {

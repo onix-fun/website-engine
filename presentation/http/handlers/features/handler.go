@@ -47,7 +47,7 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !auth.CanCreateFeature(string(actor.Role)) {
-		response.Error(w, r, http.StatusForbidden, "forbidden", "Недостаточно прав для создания Feature: "+string(actor.Role))
+		response.Error(w, r, http.StatusForbidden, "forbidden", "Недостаточно прав для создания раздела: "+string(actor.Role))
 		return
 	}
 	var in features.CreateInput
@@ -248,7 +248,7 @@ func (h *Handler) Rollback(w http.ResponseWriter, r *http.Request) {
 func featureID(w http.ResponseWriter, r *http.Request) (uuid.UUID, bool) {
 	id, err := uuid.Parse(r.PathValue("id"))
 	if err != nil {
-		response.Error(w, r, http.StatusNotFound, "not_found", "Feature не найдена")
+		response.Error(w, r, http.StatusNotFound, "not_found", "Раздел не найден")
 		return uuid.Nil, false
 	}
 	return id, true
@@ -277,9 +277,9 @@ func (h *Handler) writeError(w http.ResponseWriter, r *http.Request, err error) 
 	case errors.As(err, &conflictErr):
 		response.Error(w, r, http.StatusConflict, "conflict", conflictErr.Message)
 	case errors.Is(err, features.ErrNotFound):
-		response.Error(w, r, http.StatusNotFound, "not_found", "Feature не найдена")
+		response.Error(w, r, http.StatusNotFound, "not_found", "Раздел не найден")
 	case errors.Is(err, features.ErrConflict):
-		response.Error(w, r, http.StatusConflict, "conflict", "Конфликт состояния Feature")
+		response.Error(w, r, http.StatusConflict, "conflict", "Конфликт состояния раздела")
 	default:
 		h.log.Error("feature operation failed", "request_id", response.RequestID(r.Context()), "error", err)
 		response.Error(w, r, http.StatusInternalServerError, "internal_error", "Внутренняя ошибка сервера")

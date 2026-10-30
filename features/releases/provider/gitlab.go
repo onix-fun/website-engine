@@ -43,6 +43,10 @@ type glLink struct {
 }
 
 func (g *GitLab) ListReleases(ctx context.Context, repoURL string, limit int) ([]Release, error) {
+	return g.ListReleasesWithToken(ctx, repoURL, limit, "")
+}
+
+func (g *GitLab) ListReleasesWithToken(ctx context.Context, repoURL string, limit int, token string) ([]Release, error) {
 	u, err := url.Parse(repoURL)
 	if err != nil {
 		return nil, err
@@ -67,6 +71,7 @@ func (g *GitLab) ListReleases(ctx context.Context, repoURL string, limit int) ([
 		return nil, err
 	}
 	req.Header.Set("User-Agent", "website-engine")
+	setProviderToken(req, "gitlab", token)
 	resp, err := g.client.Do(req)
 	if err != nil {
 		return nil, err
@@ -95,6 +100,10 @@ func (g *GitLab) ListReleases(ctx context.Context, repoURL string, limit int) ([
 }
 
 func (g *GitLab) DownloadAsset(ctx context.Context, downloadURL string) (io.ReadCloser, int64, error) {
+	return g.DownloadAssetWithToken(ctx, "", downloadURL, "")
+}
+
+func (g *GitLab) DownloadAssetWithToken(ctx context.Context, repoURL, downloadURL, token string) (io.ReadCloser, int64, error) {
 	u, err := url.Parse(downloadURL)
 	if err != nil {
 		return nil, 0, err
@@ -110,6 +119,7 @@ func (g *GitLab) DownloadAsset(ctx context.Context, downloadURL string) (io.Read
 		return nil, 0, err
 	}
 	req.Header.Set("User-Agent", "website-engine")
+	setProviderToken(req, "gitlab", tokenForAsset(repoURL, downloadURL, token))
 	resp, err := g.client.Do(req)
 	if err != nil {
 		return nil, 0, err

@@ -73,7 +73,7 @@ export default function FeatureSettingsPage() {
   const renameMutation = useMutation({
     mutationFn: (values: RenameValues) => api.features.updateName(feature.id, values.name),
     onSuccess: () => {
-      toast.success("Название Feature обновлено");
+      toast.success("Название раздела обновлено");
       void queryClient.invalidateQueries({
         queryKey: queryKeys.features.detail(feature.id),
       });
@@ -84,7 +84,7 @@ export default function FeatureSettingsPage() {
   const archiveMutation = useMutation({
     mutationFn: () => api.features.archive(feature.id),
     onSuccess: () => {
-      toast.success("Feature архивирована");
+      toast.success("Раздел архивирован");
       void queryClient.invalidateQueries({
         queryKey: queryKeys.features.detail(feature.id),
       });
@@ -99,10 +99,10 @@ export default function FeatureSettingsPage() {
 
   const requestArchive = async () => {
     const confirmed = await confirm({
-      title: "Архивировать Feature?",
+      title: "Архивировать раздел?",
       description: (
         <>
-          Feature <strong>«{feature.name}»</strong> станет архивной. Схему,
+          Раздел <strong>«{feature.name}»</strong> будет перемещён в архив. Схему,
           контент и настройки можно будет только просматривать. Вернуть из архива
           через этот интерфейс нельзя.
         </>
@@ -116,34 +116,34 @@ export default function FeatureSettingsPage() {
   return (
     <div className="max-w-5xl space-y-5">
       <div>
-        <h2 className="text-lg font-semibold tracking-tight">Настройки Feature</h2>
+        <h2 className="text-lg font-semibold tracking-tight">Настройки раздела</h2>
         <p className="mt-1 text-sm text-muted-foreground">
-          Реальные свойства, поддерживаемые backend. Ключ, тип и идентификаторы
+          Свойства, поддерживаемые серверной частью. Ключ, тип и идентификаторы
           доступны только для чтения.
         </p>
       </div>
 
       {archived && (
-        <InlineAlert tone="warning" title="Feature в архиве">
+        <InlineAlert tone="warning" title="Раздел в архиве">
           Изменения заблокированы. Доступен только просмотр существующих данных.
         </InlineAlert>
       )}
 
       {archiveMutation.isError && (
-        <ErrorState error={archiveMutation.error} title="Не удалось архивировать Feature" />
+        <ErrorState error={archiveMutation.error} title="Не удалось архивировать раздел" />
       )}
 
       <Card>
         <CardHeader>
           <CardTitle>Название</CardTitle>
           <CardDescription>
-            Отображается в каталоге Features и заголовке рабочей области.
+            Отображается в каталоге разделов и заголовке рабочей области.
           </CardDescription>
         </CardHeader>
         <CardContent>
           <form onSubmit={handleSubmit(onSubmit)} className="space-y-3" noValidate>
             {renameMutation.isError && (
-              <ErrorState error={renameMutation.error} title="Не удалось переименовать Feature" />
+              <ErrorState error={renameMutation.error} title="Не удалось переименовать раздел" />
             )}
             <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
               <div className="flex-1 space-y-2">
@@ -205,16 +205,16 @@ export default function FeatureSettingsPage() {
             <MetaRow label="Создал токен">
               <code className="text-xs">{feature.created_by ?? "—"}</code>
             </MetaRow>
-            <MetaRow label="ID Feature">
+            <MetaRow label="ID раздела">
               <code className="break-all text-xs">{feature.id}</code>
             </MetaRow>
-            <MetaRow label="Draft version ID">
+            <MetaRow label="ID версии черновика">
               <code className="break-all text-xs">{feature.draft_version_id ?? "—"}</code>
             </MetaRow>
-            <MetaRow label="Dev version ID">
+            <MetaRow label="ID версии dev">
               <code className="break-all text-xs">{feature.dev_version_id ?? "—"}</code>
             </MetaRow>
-            <MetaRow label="Prod version ID">
+            <MetaRow label="ID версии prod">
               <code className="break-all text-xs">{feature.prod_version_id ?? "—"}</code>
             </MetaRow>
           </dl>
@@ -225,14 +225,14 @@ export default function FeatureSettingsPage() {
         <CardHeader>
           <CardTitle className="text-destructive">Архивирование</CardTitle>
           <CardDescription>
-            Backend не поддерживает удаление Feature и восстановление из архива.
+            Серверная часть не поддерживает удаление раздела и восстановление из архива.
             Архивирование блокирует изменения, но сохраняет данные.
           </CardDescription>
         </CardHeader>
         <CardContent>
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <p className="max-w-2xl text-sm text-muted-foreground">
-              Убедитесь, что Feature больше не используется на сайте. Действие
+              Убедитесь, что раздел больше не используется на сайте. Действие
               необратимо через текущий интерфейс.
             </p>
             <Button

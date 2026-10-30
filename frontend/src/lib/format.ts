@@ -91,7 +91,7 @@ export const roleShortLabels: Record<Role, string> = {
 
 export const featureTypeLabels: Record<FeatureType, string> = {
   collection: "Коллекция",
-  single: "Одиночная",
+  single: "Одна запись",
   form: "Форма",
 };
 

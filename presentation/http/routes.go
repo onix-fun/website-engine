@@ -10,7 +10,7 @@ import (
 	"websiteengine/features/auth"
 	"websiteengine/pkg/environment"
 	"websiteengine/pkg/response"
-	"websiteengine/pkg/site"
+	publicruntime "websiteengine/pkg/runtime"
 	"websiteengine/pkg/static"
 	hauth "websiteengine/presentation/http/handlers/auth"
 	hcontent "websiteengine/presentation/http/handlers/content"
@@ -21,6 +21,7 @@ import (
 	hpublication "websiteengine/presentation/http/handlers/publication"
 	hreleases "websiteengine/presentation/http/handlers/releases"
 	hsettings "websiteengine/presentation/http/handlers/settings"
+	hsitebuilder "websiteengine/presentation/http/handlers/sitebuilder"
 	"websiteengine/presentation/http/middleware"
 )
 
@@ -39,7 +40,8 @@ type Dependencies struct {
 	Releases          *hreleases.Handler
 	PublicationEvents *hpublication.Handler
 	Settings          *hsettings.Handler
-	Site              *site.Manager
+	FeatureBuilds     *hsitebuilder.BuildsHandler
+	SiteSnapshots     *hsitebuilder.SnapshotsHandler
 	CorsResolver      middleware.CorsResolver
 	DevPublicBaseURL  string
 	ProdPublicBaseURL string
@@ -113,6 +115,18 @@ func NewRouter(d Deps) http.Handler {
 	mux.Handle("GET /api/v1/admin/overview", user(d.Overview.Get))
 
 	// Feature metadata and schema publication.
+	if d.FeatureBuilds != nil {
+		mux.Handle("GET /api/v2/admin/feature-builds", user(d.FeatureBuilds.List))
+		mux.Handle("POST /api/v2/admin/feature-builds", staff(d.FeatureBuilds.Import))
+	}
+	if d.SiteSnapshots != nil {
+		mux.Handle("GET /api/v2/admin/site/draft", user(d.SiteSnapshots.Draft))
+		mux.Handle("PUT /api/v2/admin/site/draft", jsonStaff(d.SiteSnapshots.SaveDraft))
+		mux.Handle("GET /api/v2/admin/site/snapshots", user(d.SiteSnapshots.List))
+		mux.Handle("POST /api/v2/admin/site/snapshots", jsonStaff(d.SiteSnapshots.Publish))
+		mux.Handle("POST /api/v2/admin/site/snapshots/{id}/promote", jsonLimit(admin(d.SiteSnapshots.Promote)))
+		mux.Handle("POST /api/v2/admin/site/snapshots/{id}/rollback", jsonLimit(admin(d.SiteSnapshots.Rollback)))
+	}
 	mux.Handle("GET /api/v1/admin/features", user(d.Features.List))
 	mux.Handle("POST /api/v1/admin/features", jsonStaff(d.Features.Create))
 	mux.Handle("GET /api/v1/admin/features/{id}", user(d.Features.Get))
@@ -126,8 +140,10 @@ func NewRouter(d Deps) http.Handler {
 	mux.Handle("POST /api/v1/admin/features/{id}/rollback", jsonStaff(d.Features.Rollback))
 
 	// Content entries.
+	mux.Handle("PUT /api/v2/admin/features/{id}/entries/order", jsonUser(d.Content.Reorder))
 	mux.Handle("GET /api/v1/admin/features/{id}/entries", user(d.Content.ListEntries))
 	mux.Handle("POST /api/v1/admin/features/{id}/entries", jsonUser(d.Content.Create))
+	mux.Handle("POST /api/v2/admin/features/{id}/entries/import", jsonUser(d.Content.Import))
 	mux.Handle("GET /api/v1/admin/entries/{id}", user(d.Content.Get))
 	mux.Handle("PATCH /api/v1/admin/entries/{id}/draft", jsonUser(d.Content.SaveDraft))
 	mux.Handle("POST /api/v1/admin/entries/{id}/publish", jsonUser(d.Content.Publish))
@@ -228,7 +244,7 @@ func NewRouter(d Deps) http.Handler {
 
 // NewPublicRouter serves a single site environment. The handler tags itself
 // with that environment, so content and CORS resolve to the right listener.
-func NewPublicRouter(d Deps, env environment.Environment, baseURL string) http.Handler {
+func NewPublicRouter(d Deps, env environment.Environment) http.Handler {
 	if d.FormRateWindow <= 0 {
 		d.FormRateWindow = time.Minute
 	}
@@ -247,6 +263,9 @@ func NewPublicRouter(d Deps, env environment.Environment, baseURL string) http.H
 		}
 		response.JSON(w, http.StatusOK, map[string]string{"status": "ready"})
 	})
+	if d.FeatureBuilds != nil {
+		mux.HandleFunc("GET /feature-assets/{digest}/{asset...}", d.FeatureBuilds.Asset)
+	}
 
 	corsByEnv := d.PublicCORSByEnv
 	if corsByEnv == nil {
@@ -265,23 +284,34 @@ func NewPublicRouter(d Deps, env environment.Environment, baseURL string) http.H
 		"OPTIONS /api/v1/content/{key}",
 		"OPTIONS /api/v1/content/{key}/entries",
 		"OPTIONS /api/v1/forms/{key}/submissions",
+		"OPTIONS /api/v2/runtime",
+		"OPTIONS /api/v2/content/{key}/records",
+		"OPTIONS /api/v2/forms/{key}/submissions",
 	} {
 		mux.Handle(pattern, cors(noop))
 	}
+	// The v1 CMS endpoints remain direct content/form APIs for existing
+	// integrations. The embedded site runtime uses only snapshot-pinned v2.
 	mux.Handle("GET /api/v1/content", cors(http.HandlerFunc(d.Content.PublicContent)))
 	mux.Handle("GET /api/v1/content/{key}", cors(http.HandlerFunc(d.Content.PublicFeature)))
 	mux.Handle("GET /api/v1/content/{key}/entries", cors(http.HandlerFunc(d.Content.PublicEntries)))
 	formLimiter := middleware.NewRateLimiter(d.FormRateLimit, d.FormRateWindow, d.TrustProxy)
 	mux.Handle("POST /api/v1/forms/{key}/submissions",
 		cors(middleware.BodyLimit(d.MaxJSONBytes)(formLimiter.Middleware(http.HandlerFunc(d.Forms.Submit)))))
+	if d.SiteSnapshots != nil {
+		mux.Handle("GET /api/v2/runtime", cors(http.HandlerFunc(d.SiteSnapshots.Runtime)))
+		mux.Handle("GET /api/v2/content/{key}/records", cors(http.HandlerFunc(d.SiteSnapshots.Collection)))
+		mux.Handle("POST /api/v2/forms/{key}/submissions", cors(middleware.BodyLimit(d.MaxJSONBytes)(formLimiter.Middleware(http.HandlerFunc(d.SiteSnapshots.SubmitForm)))))
+	}
 	mux.HandleFunc("GET /media/{key}", d.Media.Redirect)
 
-	if d.Site != nil {
-		mux.HandleFunc("/api/", func(w http.ResponseWriter, r *http.Request) {
-			response.Error(w, r, http.StatusNotFound, "not_found", "Маршрут API не найден")
-		})
-		mux.Handle("/", d.Site.Handler(env, baseURL))
-	}
+	mux.HandleFunc("/api/", func(w http.ResponseWriter, r *http.Request) {
+		response.Error(w, r, http.StatusNotFound, "not_found", "Маршрут API не найден")
+	})
+	// The engine always serves its embedded runtime shell. Published snapshots
+	// supply the composition and feature assets; the old full-site release
+	// handler is intentionally not part of this runtime path.
+	mux.Handle("/", publicruntime.Handler())
 
 	handler := middleware.RequestID(mux)
 	handler = middleware.SecurityHeaders(handler)

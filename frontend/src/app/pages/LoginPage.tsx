@@ -257,7 +257,7 @@ export function LoginPage() {
 
             <div className="mt-6 rounded-md border border-border bg-muted/30 p-3 text-2xs leading-5 text-muted-foreground">
               Пользовательские токены могут пройти проверку, но не получают доступ к
-              администрированию. Это ограничение backend.
+              администрированию. Это ограничение серверной части.
             </div>
           </div>
         </div>

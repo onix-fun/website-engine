@@ -27,7 +27,7 @@ func NewHandler(service *content.Service, log *slog.Logger, maxJSON int64) *Hand
 }
 
 func (h *Handler) ListEntries(w http.ResponseWriter, r *http.Request) {
-	featureID, ok := uuidParam(w, r, "id", "Feature не найдена")
+	featureID, ok := uuidParam(w, r, "id", "Раздел не найден")
 	if !ok {
 		return
 	}
@@ -45,13 +45,34 @@ func (h *Handler) ListEntries(w http.ResponseWriter, r *http.Request) {
 	response.JSON(w, http.StatusOK, map[string]any{"items": items, "next_cursor": nullable(next)})
 }
 
+type reorderRequest struct {
+	EntryIDs []uuid.UUID `json:"entryIds"`
+}
+
+func (h *Handler) Reorder(w http.ResponseWriter, r *http.Request) {
+	featureID, ok := uuidParam(w, r, "id", "Feature не найден")
+	if !ok {
+		return
+	}
+	var req reorderRequest
+	if err := response.DecodeJSON(w, r, &req, h.maxJSON); err != nil {
+		response.WriteDecodeError(w, r, err)
+		return
+	}
+	if err := h.service.Reorder(r.Context(), featureID, req.EntryIDs); err != nil {
+		h.writeError(w, r, err)
+		return
+	}
+	response.NoContent(w)
+}
+
 type dataRequest struct {
 	Data json.RawMessage `json:"data"`
 }
 
 func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 	actor, _ := principal.FromContext(r.Context())
-	featureID, ok := uuidParam(w, r, "id", "Feature не найдена")
+	featureID, ok := uuidParam(w, r, "id", "Раздел не найден")
 	if !ok {
 		return
 	}
@@ -66,6 +87,48 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	response.JSON(w, http.StatusCreated, detail)
+}
+
+type importRequest struct {
+	Data     json.RawMessage `json:"data"`
+	EntryID  *uuid.UUID      `json:"entryId,omitempty"`
+	Revision int64           `json:"revision,omitempty"`
+}
+
+func (h *Handler) Import(w http.ResponseWriter, r *http.Request) {
+	actor, _ := principal.FromContext(r.Context())
+	featureID, ok := uuidParam(w, r, "id", "Раздел не найден")
+	if !ok {
+		return
+	}
+	var req importRequest
+	if err := response.DecodeJSON(w, r, &req, h.maxJSON); err != nil {
+		response.WriteDecodeError(w, r, err)
+		return
+	}
+	if len(req.Data) == 0 || !json.Valid(req.Data) {
+		response.Error(w, r, http.StatusBadRequest, "invalid_import", "Файл должен содержать JSON-объект или массив объектов")
+		return
+	}
+	data := []byte(strings.TrimSpace(string(req.Data)))
+	var records []json.RawMessage
+	if data[0] == '[' {
+		if err := json.Unmarshal(data, &records); err != nil {
+			response.Error(w, r, http.StatusBadRequest, "invalid_import", "Не удалось прочитать массив записей")
+			return
+		}
+	} else if data[0] == '{' {
+		records = []json.RawMessage{data}
+	} else {
+		response.Error(w, r, http.StatusBadRequest, "invalid_import", "Файл должен содержать JSON-объект или массив объектов")
+		return
+	}
+	items, err := h.service.Import(r.Context(), actor, featureID, req.EntryID, req.Revision, records)
+	if err != nil {
+		h.writeError(w, r, err)
+		return
+	}
+	response.JSON(w, http.StatusCreated, map[string]any{"items": items, "imported": len(items)})
 }
 
 func (h *Handler) Get(w http.ResponseWriter, r *http.Request) {
@@ -277,14 +340,14 @@ func (h *Handler) PublicContent(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		if len(key) > 100 {
-			response.Error(w, r, http.StatusBadRequest, "invalid_key", "Некорректный ключ Feature")
+			response.Error(w, r, http.StatusBadRequest, "invalid_key", "Некорректный ключ раздела")
 			return
 		}
 		seen[key] = true
 		keys = append(keys, key)
 	}
 	if len(keys) == 0 || len(keys) > 20 {
-		response.Error(w, r, http.StatusBadRequest, "invalid_keys", "Запросите от 1 до 20 ключей Feature")
+		response.Error(w, r, http.StatusBadRequest, "invalid_keys", "Запросите от 1 до 20 ключей разделов")
 		return
 	}
 	limit, err := response.ParseLimit(r.URL.Query().Get("limit"), 20, 50)
@@ -362,8 +425,8 @@ func (h *Handler) writeError(w http.ResponseWriter, r *http.Request, err error) 
 		response.Error(w, r, http.StatusBadRequest, "validation_failed", validationErr.Message)
 	case errors.As(err, &conflictErr):
 		response.Error(w, r, http.StatusConflict, "conflict", conflictErr.Message)
-	case errors.Is(err, content.ErrNotFound), errors.Is(err, content.ErrNotFound):
-		response.Error(w, r, http.StatusNotFound, "not_found", "Запись или Feature не найдены")
+	case errors.Is(err, content.ErrNotFound):
+		response.Error(w, r, http.StatusNotFound, "not_found", "Запись или раздел не найдены")
 	case errors.Is(err, content.ErrConflict):
 		response.Error(w, r, http.StatusConflict, "conflict", "Конфликт состояния записи")
 	case errors.Is(err, content.ErrValidation):
@@ -379,7 +442,7 @@ func (h *Handler) writePublicError(w http.ResponseWriter, r *http.Request, err e
 	switch {
 	case errors.As(err, &conflictErr):
 		response.Error(w, r, http.StatusConflict, "conflict", conflictErr.Message)
-	case errors.Is(err, content.ErrNotFound), errors.Is(err, content.ErrNotFound):
+	case errors.Is(err, content.ErrNotFound):
 		response.Error(w, r, http.StatusNotFound, "not_found", "Опубликованный контент не найден")
 	case errors.Is(err, content.ErrValidation):
 		response.Error(w, r, http.StatusBadRequest, "validation_failed", "Некорректный запрос")

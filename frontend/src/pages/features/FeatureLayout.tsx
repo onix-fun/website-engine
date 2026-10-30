@@ -9,11 +9,9 @@ import {
 } from "react-router-dom";
 import {
   ArrowLeft,
-  Code2,
   FileText,
   Inbox,
   RefreshCw,
-  Settings2,
   Layers,
 } from "lucide-react";
 import { api, ApiError } from "@/api";
@@ -28,7 +26,6 @@ import {
 import {
   FeatureStatusBadge,
   FeatureTypeBadge,
-  SchemaStateBadge,
 } from "@/components/common/status-badges";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -45,7 +42,7 @@ export function useFeatureContext() {
     // Route misconfiguration: this page is rendered outside the FeatureLayout
     // outlet (e.g. wrapped in a route that creates its own <Outlet/>).
     throw new Error(
-      "useFeatureContext: страница Feature отрендерена вне <Outlet context> FeatureLayout",
+      "useFeatureContext: страница раздела отрендерена вне <Outlet context> FeatureLayout",
     );
   }
   return ctx;
@@ -60,22 +57,10 @@ function FeatureTabs({
 }) {
   const tabs = [
     {
-      to: `/features/${feature.id}/schema`,
-      label: "Схема",
-      icon: Code2,
-      show: true,
-    },
-    {
       to: `/features/${feature.id}/content`,
       label: "Контент",
       icon: Layers,
       show: feature.type !== "form",
-    },
-    {
-      to: `/features/${feature.id}/settings`,
-      label: "Настройки",
-      icon: Settings2,
-      show: true,
     },
   ];
   const submissionsActive = activePath.startsWith("/submissions");
@@ -132,17 +117,17 @@ export default function FeatureLayout() {
     enabled: Boolean(featureId),
   });
 
-  useDocumentTitle(featureQuery.data?.name ?? "Feature");
+  useDocumentTitle(featureQuery.data?.name ?? "Раздел");
 
   if (!featureId) {
     return (
       <div className="page-grid">
-        <EmptyState title="Feature не найдена" description="Некорректный адрес раздела." />
+        <EmptyState title="Раздел не найден" description="Некорректный адрес раздела." />
       </div>
     );
   }
 
-  if (featureQuery.isLoading) return <LoadingPage label="Загружаем Feature…" />;
+  if (featureQuery.isLoading) return <LoadingPage label="Загружаем раздел…" />;
 
   if (featureQuery.error) {
     if (featureQuery.error instanceof ApiError && featureQuery.error.status === 404) {
@@ -150,11 +135,11 @@ export default function FeatureLayout() {
         <div className="page-grid">
           <EmptyState
             icon={FileText}
-            title="Feature не найдена"
-            description="Возможно, ссылка устарела или Feature была удалена."
+            title="Раздел не найден"
+            description="Возможно, ссылка устарела или раздел был удалён."
             action={
               <Button asChild>
-                <Link to="/features">К списку Features</Link>
+                <Link to="/features">К списку разделов</Link>
               </Button>
             }
           />
@@ -165,7 +150,7 @@ export default function FeatureLayout() {
       <div className="page-grid">
         <ErrorState
           error={featureQuery.error}
-          title="Не удалось загрузить Feature"
+          title="Не удалось загрузить раздел"
           onRetry={() => void featureQuery.refetch()}
         />
       </div>
@@ -184,7 +169,7 @@ export default function FeatureLayout() {
             className="mb-3 inline-flex items-center gap-1.5 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground"
           >
             <ArrowLeft className="h-3.5 w-3.5" />
-            Все Features
+            Все разделы
           </Link>
           <div className="flex flex-col gap-3 pb-4 sm:flex-row sm:items-start sm:justify-between">
             <div className="min-w-0">
@@ -197,7 +182,6 @@ export default function FeatureLayout() {
               </div>
               <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1.5 text-xs text-muted-foreground">
                 <code>{feature.key}</code>
-                <SchemaStateBadge feature={feature} />
                 <span>Ревизия r{feature.revision}</span>
                 {feature.prod && (
                   <span>Опубликована схема v{feature.prod.version}</span>

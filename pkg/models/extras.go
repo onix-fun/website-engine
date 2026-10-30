@@ -434,4 +434,119 @@ ALTER TABLE release_events
 ALTER TABLE release_events
     ADD CONSTRAINT fk_release_events_actor
     FOREIGN KEY (actor_token_id) REFERENCES access_tokens(id) ON DELETE SET NULL;
+
+-- ---------------------------------------------------------------------------
+-- Feature builds, page composition and immutable site snapshots
+-- ---------------------------------------------------------------------------
+
+ALTER TABLE feature_builds
+    ADD CONSTRAINT feature_builds_version_check
+    CHECK (version ~ '^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$');
+
+ALTER TABLE feature_builds
+    ADD CONSTRAINT feature_builds_digest_check
+    CHECK (digest ~ '^[a-f0-9]{64}$');
+
+ALTER TABLE feature_builds
+    ADD CONSTRAINT feature_builds_size_check
+    CHECK (artifact_size > 0);
+
+ALTER TABLE feature_builds
+    ADD CONSTRAINT feature_builds_manifest_check
+    CHECK (jsonb_typeof(manifest) = 'object' AND jsonb_typeof(assets) = 'object');
+
+ALTER TABLE feature_builds
+    ADD CONSTRAINT fk_feature_builds_feature
+    FOREIGN KEY (feature_id) REFERENCES features(id) ON DELETE RESTRICT;
+
+ALTER TABLE feature_builds
+    ADD CONSTRAINT fk_feature_builds_schema
+    FOREIGN KEY (schema_version_id) REFERENCES feature_versions(id) ON DELETE RESTRICT;
+
+ALTER TABLE feature_builds
+    ADD CONSTRAINT fk_feature_builds_creator
+    FOREIGN KEY (created_by) REFERENCES access_tokens(id) ON DELETE SET NULL;
+
+ALTER TABLE site_draft_config
+    ADD CONSTRAINT site_draft_config_singleton_check
+    CHECK (id);
+
+ALTER TABLE site_draft_config
+    ADD CONSTRAINT site_draft_config_revision_check
+    CHECK (revision > 0);
+
+ALTER TABLE site_draft_config
+    ADD CONSTRAINT site_draft_config_object_check
+    CHECK (jsonb_typeof(config) = 'object');
+
+ALTER TABLE site_draft_config
+    ADD CONSTRAINT fk_site_draft_config_updater
+    FOREIGN KEY (updated_by) REFERENCES access_tokens(id) ON DELETE SET NULL;
+
+ALTER TABLE site_snapshots
+    ADD CONSTRAINT site_snapshots_sequence_check
+    CHECK (sequence > 0);
+
+ALTER TABLE site_snapshots
+    ADD CONSTRAINT site_snapshots_name_check
+    CHECK (length(trim(name)) BETWEEN 1 AND 160);
+
+ALTER TABLE site_snapshots
+    ADD CONSTRAINT site_snapshots_digest_check
+    CHECK (digest ~ '^[a-f0-9]{64}$');
+
+ALTER TABLE site_snapshots
+    ADD CONSTRAINT site_snapshots_payload_check
+    CHECK (jsonb_typeof(payload) = 'object');
+
+ALTER TABLE site_snapshots
+    ADD CONSTRAINT fk_site_snapshots_creator
+    FOREIGN KEY (created_by) REFERENCES access_tokens(id) ON DELETE SET NULL;
+
+ALTER TABLE site_environments
+    ADD CONSTRAINT fk_site_environments_snapshot
+    FOREIGN KEY (active_snapshot_id) REFERENCES site_snapshots(id) ON DELETE SET NULL;
+
+ALTER TABLE site_snapshot_events
+    ADD CONSTRAINT site_snapshot_events_environment_check
+    CHECK (environment IN ('dev', 'prod'));
+
+ALTER TABLE site_snapshot_events
+    ADD CONSTRAINT site_snapshot_events_action_check
+    CHECK (action IN ('publish', 'promote', 'rollback'));
+
+ALTER TABLE site_snapshot_events
+    ADD CONSTRAINT fk_site_snapshot_events_snapshot
+    FOREIGN KEY (snapshot_id) REFERENCES site_snapshots(id) ON DELETE RESTRICT;
+
+ALTER TABLE site_snapshot_events
+    ADD CONSTRAINT fk_site_snapshot_events_actor
+    FOREIGN KEY (actor_token_id) REFERENCES access_tokens(id) ON DELETE SET NULL;
+
+ALTER TABLE site_snapshot_content
+    ADD CONSTRAINT site_snapshot_content_key_check
+    CHECK (length(trim(feature_key)) BETWEEN 1 AND 100);
+
+ALTER TABLE site_snapshot_content
+    ADD CONSTRAINT site_snapshot_content_order_check
+    CHECK (sort_order >= 0);
+
+ALTER TABLE site_snapshot_content
+    ADD CONSTRAINT site_snapshot_content_data_check
+    CHECK (jsonb_typeof(data) = 'object');
+
+ALTER TABLE site_snapshot_content
+    ADD CONSTRAINT fk_site_snapshot_content_snapshot
+    FOREIGN KEY (snapshot_id) REFERENCES site_snapshots(id) ON DELETE RESTRICT;
+
+ALTER TABLE site_snapshot_content
+    ADD CONSTRAINT fk_site_snapshot_content_entry
+    FOREIGN KEY (entry_id) REFERENCES feature_entries(id) ON DELETE RESTRICT;
+
+ALTER TABLE site_snapshot_content
+    ADD CONSTRAINT fk_site_snapshot_content_version
+    FOREIGN KEY (version_id) REFERENCES feature_entry_versions(id) ON DELETE RESTRICT;
+
+CREATE INDEX idx_site_snapshot_content_data
+    ON site_snapshot_content USING GIN (data jsonb_path_ops);
 `

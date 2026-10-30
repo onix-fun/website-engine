@@ -31,7 +31,7 @@ export default function EnvironmentSettingsPage() {
 
   const environments = useQuery({
     queryKey: ["site-environments"],
-    queryFn: ({ signal }) => api.releases.environments(signal),
+    queryFn: ({ signal }) => api.environments.list(signal),
   });
   const env = environments.data?.items.find((item) => item.key === envKey);
 
@@ -58,9 +58,9 @@ export default function EnvironmentSettingsPage() {
     <div className="space-y-4">
       <div className="flex items-center gap-3">
         <Button variant="ghost" size="sm" asChild>
-          <Link to="/releases">
+          <Link to="/settings">
             <ArrowLeft />
-            К релизам
+            К настройкам
           </Link>
         </Button>
       </div>
@@ -108,7 +108,7 @@ function EnvironmentForm({ env, onSaved }: { env: SiteEnvironment; onSaved: () =
 
   const save = useMutation({
     mutationFn: () =>
-      api.releases.updateEnvironment(env.key, {
+      api.environments.update(env.key, {
         revision: env.revision,
         name: name.trim() || undefined,
         public_base_url: baseUrl.trim(),

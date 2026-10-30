@@ -66,10 +66,10 @@ interface NavItem {
 
 const primaryNav: NavItem[] = [
   { to: "/", label: "Главная", icon: LayoutDashboard, end: true },
-  { to: "/features", label: "Features", icon: Layers, match: (p) => p.startsWith("/features") },
+  { to: "/features", label: "Разделы", icon: Layers, match: (p) => p.startsWith("/features") },
   { to: "/submissions", label: "Заявки", icon: Inbox, match: (p) => p.startsWith("/submissions") },
   { to: "/media", label: "Медиа", icon: Image, match: (p) => p.startsWith("/media") },
-  { to: "/releases", label: "Сайт", icon: Layers, match: (p) => p.startsWith("/releases") },
+  { to: "/site", label: "Сайт", icon: Layers, match: (p) => p.startsWith("/site") },
   { to: "/access/tokens", label: "Доступы", icon: ShieldCheck, match: (p) => p.startsWith("/access") },
 ];
 
@@ -91,7 +91,7 @@ function Brand({ compact = false }: { compact?: boolean }) {
         <span className="min-w-0 leading-tight">
           <span className="block truncate text-sm font-semibold">Website Engine</span>
           <span className="block truncate text-2xs text-muted-foreground">
-            Content operations
+            Управление контентом
           </span>
         </span>
       )}
@@ -309,7 +309,7 @@ function SidebarContent({
 }
 
 const segmentLabels: Record<string, string> = {
-  features: "Features",
+  features: "Разделы",
   new: "Создание",
   schema: "Схема",
   content: "Контент",
@@ -332,7 +332,18 @@ function Breadcrumbs() {
   segments.forEach((segment, index) => {
     accumulated += `/${segment}`;
     const isLast = index === segments.length - 1;
-    const label = segmentLabels[segment] ?? (segment.length > 18 ? "Feature" : segment);
+    const parentSegment = segments[index - 1];
+    const label =
+      segmentLabels[segment] ??
+      (parentSegment === "features"
+        ? "Раздел"
+        : parentSegment === "submissions"
+          ? "Заявка"
+          : parentSegment === "content"
+            ? "Запись"
+            : segment.length > 18
+              ? "Объект"
+              : segment);
     crumbs.push({ label, to: isLast ? undefined : accumulated });
   });
 

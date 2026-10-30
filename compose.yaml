@@ -32,8 +32,8 @@ services:
       - "9001:9001"
 
   server:
-    build:
-      context: .
+    image: ${ENGINE_IMAGE:?Set ENGINE_IMAGE in .env to a published GHCR image}
+    pull_policy: always
     depends_on:
       db:
         condition: service_healthy

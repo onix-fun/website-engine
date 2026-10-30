@@ -1,7 +1,7 @@
 import type { JsonObject, JsonValue } from "@/types";
 import { isRecord, uid } from "@/lib/utils";
 import { deriveEntryTitle } from "@/lib/json";
-import type { SchemaFieldNode } from "@/domains/schema-builder/types";
+import type { SchemaFieldNode } from "@/domains/content-schema/types";
 import type {
   BlockType,
   BlockTypeOption,

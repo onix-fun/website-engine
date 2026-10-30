@@ -1,6 +1,6 @@
 import { publicMediaPath } from "@/api";
 import type { JsonObject, JsonValue } from "@/types";
-import type { SchemaFieldNode } from "@/domains/schema-builder/types";
+import type { SchemaFieldNode } from "@/domains/content-schema/types";
 import { deriveDocumentTitle } from "./blocks";
 import { entryTitleField } from "@/lib/json";
 import type { ContentBlock } from "./types";

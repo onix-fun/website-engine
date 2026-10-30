@@ -799,7 +799,7 @@ function MediaActions({
   });
 
   const requestDelete = async () => {
-    let usages: MediaUsage[] = [];
+    let usages: MediaUsage[];
     try {
       usages = (await api.media.usage(media.id)).items;
     } catch {

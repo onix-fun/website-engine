@@ -300,8 +300,6 @@ func (h *Handler) writeError(w http.ResponseWriter, r *http.Request, err error) 
 		response.Error(w, r, http.StatusConflict, "conflict", conflictErr.Message)
 	case errors.Is(err, forms.ErrNotFound):
 		response.Error(w, r, http.StatusNotFound, "not_found", "Форма или заявка не найдены")
-	case errors.Is(err, forms.ErrNotFound):
-		response.Error(w, r, http.StatusNotFound, "not_found", "Форма не найдена")
 	case errors.Is(err, forms.ErrConflict):
 		response.Error(w, r, http.StatusConflict, "conflict", "Конфликт состояния заявки")
 	default:

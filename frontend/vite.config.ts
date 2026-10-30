@@ -1,5 +1,5 @@
 import { fileURLToPath, URL } from "node:url";
-import { defineConfig } from "vite";
+import { defineConfig } from "vitest/config";
 import react from "@vitejs/plugin-react";
 
 // The admin SPA is embedded in the Go binary and served at /admin/. Keep the
@@ -17,6 +17,15 @@ export default defineConfig({
     emptyOutDir: true,
     sourcemap: false,
     chunkSizeWarningLimit: 900,
+    rollupOptions: {
+      input: {
+        index: fileURLToPath(new URL("./admin.html", import.meta.url)),
+      },
+    },
+  },
+  test: {
+    include: ["src/**/*.test.ts"],
+    environment: "node",
   },
   server: {
     port: 5173,

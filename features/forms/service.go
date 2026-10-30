@@ -76,6 +76,42 @@ func (s *Service) Submit(ctx context.Context, env environment.Environment, key s
 	return submission, nil
 }
 
+// SubmitWithSchema persists a submission using the schema pinned by the
+// active site snapshot. This keeps form validation stable across promotions
+// and rollbacks while the submissions themselves remain independent.
+func (s *Service) SubmitWithSchema(ctx context.Context, env environment.Environment, key string, schemaVersionID uuid.UUID, schema, data json.RawMessage) (Submission, error) {
+	if err := validateObject(data); err != nil {
+		return Submission{}, err
+	}
+	fieldErrors, err := validate.Validate(schema, data)
+	if err != nil {
+		return Submission{}, fmt.Errorf("validate snapshot form data: %w", err)
+	}
+	if len(fieldErrors) > 0 {
+		return Submission{}, &ValidationError{Message: "Данные не соответствуют форме", Details: fieldErrors}
+	}
+	feature, err := s.featureRepo.GetByKey(ctx, key)
+	if err != nil {
+		return Submission{}, err
+	}
+	if feature.Type != "form" {
+		return Submission{}, &ValidationError{Message: "Feature не является формой"}
+	}
+	tx, err := s.repo.Begin(ctx)
+	if err != nil {
+		return Submission{}, err
+	}
+	defer func() { _ = tx.Rollback(context.Background()) }()
+	submission := Submission{ID: uuid.New(), FeatureID: feature.ID, FeatureKey: feature.Key, SchemaVersionID: schemaVersionID, Environment: env.String(), Data: data, Status: "new"}
+	if err := s.repo.InsertSubmission(ctx, tx, submission); err != nil {
+		return Submission{}, translateDBError(err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return Submission{}, translateDBError(err)
+	}
+	return submission, nil
+}
+
 func (s *Service) Get(ctx context.Context, id uuid.UUID) (Submission, error) {
 	return s.repo.Get(ctx, s.repo.pool, id)
 }

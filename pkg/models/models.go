@@ -55,8 +55,9 @@ func (FeatureVersion) TableName() string { return "feature_versions" }
 // FeatureEntry is a row of the feature_entries table.
 type FeatureEntry struct {
 	ID             UUID       `gorm:"column:id;primaryKey;not null;uniqueIndex:uq_feature_entries_identity,priority:1"`
-	FeatureID      UUID       `gorm:"column:feature_id;not null;uniqueIndex:uq_feature_entries_identity,priority:2"`
+	FeatureID      UUID       `gorm:"column:feature_id;not null;uniqueIndex:uq_feature_entries_identity,priority:2;index:idx_feature_entries_order,priority:1"`
 	SingleSlot     bool       `gorm:"column:single_slot;not null;default:false"`
+	SortOrder      int        `gorm:"column:sort_order;not null;default:0;index:idx_feature_entries_order,priority:2"`
 	Revision       int64      `gorm:"column:revision;not null;default:1"`
 	DraftVersionID *UUID      `gorm:"column:draft_version_id"`
 	DevVersionID   *UUID      `gorm:"column:dev_version_id"`
@@ -188,20 +189,88 @@ func (SiteRelease) TableName() string { return "site_releases" }
 
 // SiteEnvironment is a row of the site_environments table.
 type SiteEnvironment struct {
-	Key             string    `gorm:"column:key;primaryKey;not null"`
-	Name            string    `gorm:"column:name;not null"`
-	PublicBaseURL   string    `gorm:"column:public_base_url;not null;default:''"`
-	Domains         TextArray `gorm:"column:domains;not null;default:'{}'"`
-	HTTPPort        int       `gorm:"column:http_port;not null;type:integer"`
-	TLSEnabled      bool      `gorm:"column:tls_enabled;not null;default:false"`
-	CORSOrigins     TextArray `gorm:"column:cors_origins;not null;default:'{}'"`
-	ActiveReleaseID *UUID     `gorm:"column:active_release_id"`
-	Revision        int64     `gorm:"column:revision;not null;default:1"`
-	UpdatedAt       time.Time `gorm:"column:updated_at;not null;default:now();autoUpdateTime"`
+	Key              string    `gorm:"column:key;primaryKey;not null"`
+	Name             string    `gorm:"column:name;not null"`
+	PublicBaseURL    string    `gorm:"column:public_base_url;not null;default:''"`
+	Domains          TextArray `gorm:"column:domains;not null;default:'{}'"`
+	HTTPPort         int       `gorm:"column:http_port;not null;type:integer"`
+	TLSEnabled       bool      `gorm:"column:tls_enabled;not null;default:false"`
+	CORSOrigins      TextArray `gorm:"column:cors_origins;not null;default:'{}'"`
+	ActiveReleaseID  *UUID     `gorm:"column:active_release_id"`
+	ActiveSnapshotID *UUID     `gorm:"column:active_snapshot_id"`
+	Revision         int64     `gorm:"column:revision;not null;default:1"`
+	UpdatedAt        time.Time `gorm:"column:updated_at;not null;default:now();autoUpdateTime"`
 }
 
 // TableName implements the GORM Tabler interface.
 func (SiteEnvironment) TableName() string { return "site_environments" }
+
+// FeatureBuild is an immutable ESM artifact and its developer-authored manifest.
+type FeatureBuild struct {
+	ID              UUID      `gorm:"column:id;primaryKey;not null;uniqueIndex:uq_feature_builds_identity,priority:1"`
+	FeatureID       UUID      `gorm:"column:feature_id;not null;uniqueIndex:uq_feature_builds_feature_version,priority:1;uniqueIndex:uq_feature_builds_identity,priority:2;index:idx_feature_builds_feature,priority:1"`
+	Version         string    `gorm:"column:version;not null;uniqueIndex:uq_feature_builds_feature_version,priority:2"`
+	SchemaVersionID UUID      `gorm:"column:schema_version_id;not null;index:idx_feature_builds_schema"`
+	Digest          string    `gorm:"column:digest;not null;uniqueIndex:uq_feature_builds_digest"`
+	ArtifactSize    int64     `gorm:"column:artifact_size;not null"`
+	Manifest        JSONB     `gorm:"column:manifest;not null"`
+	Assets          JSONB     `gorm:"column:assets;not null"`
+	CreatedBy       *UUID     `gorm:"column:created_by"`
+	CreatedAt       time.Time `gorm:"column:created_at;not null;default:now();index:idx_feature_builds_feature,priority:2,sort:desc"`
+}
+
+func (FeatureBuild) TableName() string { return "feature_builds" }
+
+// SiteDraftConfig stores the editable page and route composition. Snapshots
+// copy this document and pin all referenced feature builds and content versions.
+type SiteDraftConfig struct {
+	ID        bool      `gorm:"column:id;primaryKey;not null;default:true"`
+	Config    JSONB     `gorm:"column:config;not null;default:'{}'"`
+	Revision  int64     `gorm:"column:revision;not null;default:1"`
+	UpdatedBy *UUID     `gorm:"column:updated_by"`
+	UpdatedAt time.Time `gorm:"column:updated_at;not null;default:now();autoUpdateTime"`
+}
+
+func (SiteDraftConfig) TableName() string { return "site_draft_config" }
+
+// SiteSnapshot is an immutable full deployment state for the single site.
+type SiteSnapshot struct {
+	ID        UUID      `gorm:"column:id;primaryKey;not null"`
+	Sequence  int64     `gorm:"column:sequence;not null;uniqueIndex:uq_site_snapshots_sequence;autoIncrement"`
+	Name      string    `gorm:"column:name;not null"`
+	Digest    string    `gorm:"column:digest;not null;uniqueIndex:uq_site_snapshots_digest"`
+	Payload   JSONB     `gorm:"column:payload;not null"`
+	CreatedBy *UUID     `gorm:"column:created_by"`
+	CreatedAt time.Time `gorm:"column:created_at;not null;default:now();index:idx_site_snapshots_created,priority:1,sort:desc"`
+}
+
+func (SiteSnapshot) TableName() string { return "site_snapshots" }
+
+// SiteSnapshotEvent records immutable snapshot creation, promotion and rollback.
+type SiteSnapshotEvent struct {
+	ID           UUID      `gorm:"column:id;primaryKey;not null"`
+	SnapshotID   UUID      `gorm:"column:snapshot_id;not null;index:idx_site_snapshot_events_env,priority:2"`
+	Environment  string    `gorm:"column:environment;not null;index:idx_site_snapshot_events_env,priority:1"`
+	Action       string    `gorm:"column:action;not null"`
+	ActorTokenID *UUID     `gorm:"column:actor_token_id"`
+	CreatedAt    time.Time `gorm:"column:created_at;not null;default:now();index:idx_site_snapshot_events_env,priority:3,sort:desc"`
+}
+
+func (SiteSnapshotEvent) TableName() string { return "site_snapshot_events" }
+
+// SiteSnapshotContent pins a single or collection record version into a
+// snapshot. JSONB filtering happens in PostgreSQL so large collections are
+// never shipped to a public browser just to find one detail record.
+type SiteSnapshotContent struct {
+	SnapshotID UUID   `gorm:"column:snapshot_id;primaryKey;not null;uniqueIndex:uq_site_snapshot_content_entry,priority:1;index:idx_site_snapshot_content_order,priority:1"`
+	FeatureKey string `gorm:"column:feature_key;primaryKey;not null;uniqueIndex:uq_site_snapshot_content_entry,priority:2;index:idx_site_snapshot_content_order,priority:2"`
+	EntryID    UUID   `gorm:"column:entry_id;primaryKey;not null;uniqueIndex:uq_site_snapshot_content_entry,priority:3"`
+	VersionID  UUID   `gorm:"column:version_id;not null"`
+	SortOrder  int    `gorm:"column:sort_order;not null;default:0;index:idx_site_snapshot_content_order,priority:3"`
+	Data       JSONB  `gorm:"column:data;not null"`
+}
+
+func (SiteSnapshotContent) TableName() string { return "site_snapshot_content" }
 
 // ReleaseEvent is a row of the release_events table.
 type ReleaseEvent struct {
@@ -225,6 +294,7 @@ func All() []any {
 		&FeatureVersion{},
 		&FeatureEntry{},
 		&FeatureEntryVersion{},
+		&FeatureBuild{},
 		&FormSubmission{},
 		&MediaObject{},
 		&ContentPublicationEvent{},
@@ -233,5 +303,9 @@ func All() []any {
 		&SiteRelease{},
 		&SiteEnvironment{},
 		&ReleaseEvent{},
+		&SiteDraftConfig{},
+		&SiteSnapshot{},
+		&SiteSnapshotEvent{},
+		&SiteSnapshotContent{},
 	}
 }

@@ -19,13 +19,13 @@ import (
 	"websiteengine/features/overview"
 	"websiteengine/features/releases"
 	"websiteengine/features/settings"
+	"websiteengine/features/sitebuilder"
 	"websiteengine/migrations"
 	"websiteengine/pkg/config"
 	"websiteengine/pkg/environment"
 	"websiteengine/pkg/https"
 	"websiteengine/pkg/postgres"
 	"websiteengine/pkg/secrets"
-	"websiteengine/pkg/site"
 	"websiteengine/pkg/storage/s3"
 	httptransport "websiteengine/presentation/http"
 	hauth "websiteengine/presentation/http/handlers/auth"
@@ -37,6 +37,7 @@ import (
 	hpublication "websiteengine/presentation/http/handlers/publication"
 	hreleases "websiteengine/presentation/http/handlers/releases"
 	hsettings "websiteengine/presentation/http/handlers/settings"
+	hsitebuilder "websiteengine/presentation/http/handlers/sitebuilder"
 )
 
 // run starts the API server. The page-size constants mirror the limits that
@@ -117,6 +118,9 @@ func run(log *slog.Logger) error {
 			return fmt.Errorf("ensure S3 bucket: %w", err)
 		}
 	}
+	featureBuildService := sitebuilder.NewBuildService(pool, objectStore, cfg.MaxReleaseBytes)
+	featureBuildHandler := hsitebuilder.NewBuildsHandler(featureBuildService, log, cfg.MaxReleaseBytes)
+	snapshotService := sitebuilder.NewSnapshotService(pool, featureBuildService)
 
 	featureRepo := features.NewRepository(pool)
 	featureService := features.NewService(featureRepo)
@@ -129,6 +133,7 @@ func run(log *slog.Logger) error {
 	formsRepo := forms.NewRepository(pool)
 	formsService := forms.NewService(formsRepo, featureRepo)
 	formsHandler := hforms.NewHandler(formsService, log, cfg.MaxJSONBytes)
+	snapshotHandler := hsitebuilder.NewSnapshotsHandler(snapshotService, formsService, log, cfg.MaxJSONBytes)
 
 	mediaRepo := media.NewRepository(pool)
 	mediaService := media.NewService(mediaRepo, objectStore, cfg.MaxUploadBytes)
@@ -177,34 +182,13 @@ func run(log *slog.Logger) error {
 	releaseService := releases.NewService(releaseRepo, objectStore, box, cfg.MaxReleaseBytes)
 	releases.ConfigureSourceHosts(cfg.ProviderExtraHosts, cfg.ProviderAllowInsecure)
 	releaseHandler := hreleases.NewHandler(releaseService, log, cfg.MaxReleaseBytes)
-	siteManager := site.NewManagerWithLogger(site.NewRepository(pool), objectStore, cfg.ReleaseCacheDir, log)
-
-	// The database is the source of truth for public base URLs; the
-	// environment variables only bootstrap empty values. Change requires a
-	// restart, matching the listeners built once at startup.
-	devBaseURL, prodBaseURL := cfg.DevPublicBaseURL, cfg.ProdPublicBaseURL
-	if states, err := releaseService.Environments(ctx); err == nil {
-		for _, st := range states {
-			switch st.Key {
-			case environment.Dev:
-				if st.PublicBaseURL != "" {
-					devBaseURL = st.PublicBaseURL
-				}
-			case environment.Prod:
-				if st.PublicBaseURL != "" {
-					prodBaseURL = st.PublicBaseURL
-				}
-			}
-		}
-	} else {
-		log.Warn("site environment settings unavailable at startup", "error", err)
-	}
 
 	deps := httptransport.Dependencies{
 		Log: log, AuthService: authService, Auth: authHandler,
 		Features: featureHandler, Content: contentHandler, Forms: formsHandler, Media: mediaHandler,
 		Overview: overviewHandler, Health: health, MaxJSONBytes: cfg.MaxJSONBytes,
-		Releases: releaseHandler, Site: siteManager, Settings: settingsHandler,
+		FeatureBuilds: featureBuildHandler, SiteSnapshots: snapshotHandler,
+		Releases: releaseHandler, Settings: settingsHandler,
 		PublicationEvents: publicationEventsHandler,
 		CorsResolver:      releaseService.Cors(),
 		FormRateLimit:     cfg.FormRateLimit, FormRateWindow: cfg.FormRateWindow,
@@ -213,14 +197,14 @@ func run(log *slog.Logger) error {
 
 	servers := []*http.Server{
 		newServer(cfg.HTTPAddr, httptransport.NewRouter(deps), cfg),
-		newServer(cfg.DevHTTPAddr, httptransport.NewPublicRouter(deps, environment.Dev, devBaseURL), cfg),
-		newServer(cfg.ProdHTTPAddr, httptransport.NewPublicRouter(deps, environment.Prod, prodBaseURL), cfg),
+		newServer(cfg.DevHTTPAddr, httptransport.NewPublicRouter(deps, environment.Dev), cfg),
+		newServer(cfg.ProdHTTPAddr, httptransport.NewPublicRouter(deps, environment.Prod), cfg),
 	}
 
 	var tlsRouter *https.Router
 	if cfg.TLS.Enabled {
-		devPublic := httptransport.NewPublicRouter(deps, environment.Dev, devBaseURL)
-		prodPublic := httptransport.NewPublicRouter(deps, environment.Prod, prodBaseURL)
+		devPublic := httptransport.NewPublicRouter(deps, environment.Dev)
+		prodPublic := httptransport.NewPublicRouter(deps, environment.Prod)
 		tlsRouter, err = https.NewRouter(cfg.TLS, environmentDomains{service: releaseService}, map[environment.Environment]http.Handler{
 			environment.Dev:  devPublic,
 			environment.Prod: prodPublic,

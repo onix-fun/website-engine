@@ -9,6 +9,7 @@ import type {
   EntryVersion,
   Environment,
   EnvironmentPatch,
+  FeatureBuild,
   Feature,
   FeatureDetail,
   FeatureDraftState,
@@ -20,14 +21,14 @@ import type {
   MediaListParams,
   MediaStatus,
   MediaUsage,
-  NewReleaseSourceInput,
   Overview,
   Principal,
-  ReleaseSource,
-  RemoteRelease,
   Settings,
   SiteEnvironment,
-  SiteRelease,
+  SiteConfig,
+  SiteDraftState,
+  SiteSnapshot,
+  SiteSnapshotList,
   Submission,
   SubmissionFilters,
   SubmissionStatus,
@@ -39,6 +40,7 @@ export const UNAUTHORIZED_EVENT = "we:unauthorized";
 
 const API_ROOT = "/api/v1";
 const ADMIN_ROOT = `${API_ROOT}/admin`;
+const ADMIN_V2_ROOT = "/api/v2/admin";
 
 type QueryValue = string | number | boolean | null | undefined;
 
@@ -412,6 +414,17 @@ export const api = {
         { method: "POST", body: { data } },
       );
     },
+    import(
+      featureId: string,
+      data: JsonObject | JsonObject[],
+      entryId?: string,
+      revision?: number,
+    ): Promise<{ items: EntryDetail[]; imported: number }> {
+      return request<{ items: EntryDetail[]; imported: number }>(
+        `/api/v2/admin/features/${encoded(featureId)}/entries/import`,
+        { method: "POST", body: { data, entryId, revision } },
+      );
+    },
     get(id: string, signal?: AbortSignal): Promise<EntryDetail> {
       return request<EntryDetail>(`${ADMIN_ROOT}/entries/${encoded(id)}`, {
         signal,
@@ -586,29 +599,11 @@ export const api = {
     },
   },
 
-  releases: {
-    list(cursor?: string | null, limit = 50, signal?: AbortSignal): Promise<ListResponse<SiteRelease>> {
-      return request<ListResponse<SiteRelease>>(`${ADMIN_ROOT}/releases`, {
-        signal,
-        query: { cursor, limit },
-      });
-    },
-    activate(id: string, environment: Environment): Promise<SiteRelease> {
-      return request<SiteRelease>(`${ADMIN_ROOT}/releases/${encoded(id)}/activate`, {
-        method: "POST",
-        body: { environment },
-      });
-    },
-    rollback(id: string, environment: Environment): Promise<SiteRelease> {
-      return request<SiteRelease>(`${ADMIN_ROOT}/releases/${encoded(id)}/rollback`, {
-        method: "POST",
-        body: { environment },
-      });
-    },
-    environments(signal?: AbortSignal): Promise<{ items: SiteEnvironment[] }> {
+  environments: {
+    list(signal?: AbortSignal): Promise<{ items: SiteEnvironment[] }> {
       return request<{ items: SiteEnvironment[] }>(`${ADMIN_ROOT}/site/environments`, { signal });
     },
-    updateEnvironment(key: Environment, patch: EnvironmentPatch): Promise<SiteEnvironment> {
+    update(key: Environment, patch: EnvironmentPatch): Promise<SiteEnvironment> {
       return request<SiteEnvironment>(`${ADMIN_ROOT}/site/environments/${encoded(key)}`, {
         method: "PATCH",
         body: patch,
@@ -616,90 +611,62 @@ export const api = {
     },
   },
 
-  releaseSources: {
-    list(signal?: AbortSignal): Promise<{ items: ReleaseSource[] }> {
-      return request<{ items: ReleaseSource[] }>(`${ADMIN_ROOT}/release-sources`, { signal });
+  siteBuilder: {
+    featureBuilds(signal?: AbortSignal): Promise<{ items: FeatureBuild[] }> {
+      return request<{ items: FeatureBuild[] }>(`${ADMIN_V2_ROOT}/feature-builds`, { signal });
     },
-    create(input: NewReleaseSourceInput): Promise<ReleaseSource> {
-      return request<ReleaseSource>(`${ADMIN_ROOT}/release-sources`, {
-        method: "POST",
-        body: input,
+    draft(signal?: AbortSignal): Promise<SiteDraftState> {
+      return request<SiteDraftState>(`${ADMIN_V2_ROOT}/site/draft`, { signal });
+    },
+    saveDraft(revision: number, config: SiteConfig): Promise<SiteDraftState> {
+      return request<SiteDraftState>(`${ADMIN_V2_ROOT}/site/draft`, {
+        method: "PUT",
+        body: { revision, config },
       });
     },
-    remoteReleases(id: string, signal?: AbortSignal): Promise<{ items: RemoteRelease[] }> {
-      return request<{ items: RemoteRelease[] }>(
-        `${ADMIN_ROOT}/release-sources/${encoded(id)}/releases`,
-        { signal },
-      );
+    snapshots(signal?: AbortSignal): Promise<SiteSnapshotList> {
+      return request<SiteSnapshotList>(`${ADMIN_V2_ROOT}/site/snapshots`, { signal });
     },
-    sync(
-      id: string,
-      body: { asset_url: string; version?: string; tag?: string },
-    ): Promise<SiteRelease> {
-      return request<SiteRelease>(`${ADMIN_ROOT}/release-sources/${encoded(id)}/sync`, {
+    publish(name: string): Promise<SiteSnapshot> {
+      return request<SiteSnapshot>(`${ADMIN_V2_ROOT}/site/snapshots`, {
         method: "POST",
-        body,
+        body: { name },
       });
     },
-    remove(id: string): Promise<void> {
-      return request<void>(`${ADMIN_ROOT}/release-sources/${encoded(id)}`, { method: "DELETE" });
+    promote(id: string): Promise<SiteSnapshot> {
+      return request<SiteSnapshot>(`${ADMIN_V2_ROOT}/site/snapshots/${encoded(id)}/promote`, {
+        method: "POST",
+        body: {},
+      });
+    },
+    rollback(id: string, environment: Environment): Promise<SiteSnapshot> {
+      return request<SiteSnapshot>(`${ADMIN_V2_ROOT}/site/snapshots/${encoded(id)}/rollback`, {
+        method: "POST",
+        body: { environment },
+      });
+    },
+    async importFeatureBuild(file: File): Promise<FeatureBuild> {
+      const headers: Record<string, string> = {
+        Accept: "application/json",
+        "Content-Type": "application/zip",
+        ...authHeaders(),
+      };
+      let response: Response;
+      try {
+        response = await fetch(`${ADMIN_V2_ROOT}/feature-builds`, {
+          method: "POST",
+          headers,
+          body: file,
+        });
+      } catch {
+        throw new ApiError(0, "network_error", "Не удалось загрузить сборку фичи");
+      }
+      if (!response.ok) throw await parseErrorResponse(response);
+      return response.json() as Promise<FeatureBuild>;
     },
   },
-};
 
-export function uploadRelease(
-  file: File,
-  version: string,
-  tag: string,
-  onProgress: (percent: number | null) => void,
-  signal?: AbortSignal,
-): Promise<SiteRelease> {
-  return new Promise<SiteRelease>((resolve, reject) => {
-    const xhr = new XMLHttpRequest();
-    xhr.open("POST", buildUrl(`${ADMIN_ROOT}/releases`));
-    xhr.responseType = "json";
-    xhr.setRequestHeader("Accept", "application/json");
-    const token = getStoredToken();
-    if (token) xhr.setRequestHeader("Authorization", `Bearer ${token}`);
-    const onAbort = () => xhr.abort();
-    if (signal) {
-      if (signal.aborted) {
-        reject(new DOMException("Aborted", "AbortError"));
-        return;
-      }
-      signal.addEventListener("abort", onAbort, { once: true });
-    }
-    const cleanup = () => signal?.removeEventListener("abort", onAbort);
-    xhr.upload.onprogress = (event) => {
-      onProgress(event.lengthComputable && event.total > 0
-        ? Math.min(100, Math.round((event.loaded / event.total) * 100))
-        : null);
-    };
-    xhr.upload.onload = () => onProgress(100);
-    xhr.onerror = () => {
-      cleanup();
-      reject(new ApiError(0, "network_error", "Не удалось загрузить релиз"));
-    };
-    xhr.onabort = () => {
-      cleanup();
-      reject(new DOMException("Aborted", "AbortError"));
-    };
-    xhr.onload = () => {
-      cleanup();
-      if (xhr.status >= 200 && xhr.status < 300) {
-        resolve(xhr.response as SiteRelease);
-        return;
-      }
-      const envelope = (xhr.response as { error?: ApiErrorPayload } | null)?.error;
-      reject(new ApiError(xhr.status, envelope?.code ?? "upload_failed", envelope?.message ?? "Не удалось загрузить релиз"));
-    };
-    const form = new FormData();
-    form.append("artifact", file, file.name);
-    form.append("version", version);
-    form.append("tag", tag);
-    xhr.send(form);
-  });
-}
+};
 
 export function publicMediaPath(id: string, variant?: string): string {
   const suffix = variant ? `?variant=${encodeURIComponent(variant)}` : "";
@@ -805,6 +772,7 @@ export const MEDIA_ACCEPTED_MIME = [
   "image/png",
   "image/gif",
   "image/webp",
+  "image/svg+xml",
   "application/pdf",
   "video/mp4",
 ] as const;
@@ -815,7 +783,7 @@ export function isUploadAccepted(file: File): boolean {
   const type = file.type.toLowerCase();
   if ((MEDIA_ACCEPTED_MIME as readonly string[]).includes(type)) return true;
   const ext = file.name.slice(file.name.lastIndexOf(".")).toLowerCase();
-  return [".jpg", ".jpeg", ".png", ".gif", ".webp", ".pdf", ".mp4"].includes(ext);
+  return [".jpg", ".jpeg", ".png", ".gif", ".webp", ".svg", ".pdf", ".mp4"].includes(ext);
 }
 
 export const submissionStatusOptions: SubmissionStatus[] = [

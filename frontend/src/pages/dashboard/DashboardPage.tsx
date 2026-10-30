@@ -41,17 +41,17 @@ const statDefinitions: Array<{
 }> = [
   {
     key: "features_active",
-    label: "Активные Features",
+    label: "Активные разделы",
     description: "Доступные разделы контента",
     icon: Layers,
     to: "/features?status=active",
   },
   {
     key: "draft_features",
-    label: "Черновики схем",
-    description: "Есть неопубликованные изменения",
+    label: "Черновики моделей",
+    description: "Изменения контентных моделей",
     icon: CircleDashed,
-    to: "/features?schema=draft",
+    to: "/features",
   },
   {
     key: "new_submissions",
@@ -73,11 +73,18 @@ const activityMeta: Record<
   OverviewActivity["kind"],
   { icon: typeof Layers; label: string; to: string }
 > = {
-  feature: { icon: Layers, label: "Feature", to: "/features" },
+  feature: { icon: Layers, label: "Раздел", to: "/features" },
   entry: { icon: FileText, label: "Запись", to: "/features" },
   submission: { icon: Inbox, label: "Заявка", to: "/submissions" },
   media: { icon: Image, label: "Медиа", to: "/media" },
 };
+
+function activityTitle(item: OverviewActivity): string {
+  if (item.kind === "feature" && item.title.startsWith("Feature:")) {
+    return `Раздел:${item.title.slice("Feature:".length)}`;
+  }
+  return item.title;
+}
 
 function OverviewSkeleton() {
   return (
@@ -123,19 +130,19 @@ export default function DashboardPage() {
     <div className="page-grid">
       <PageHeader
         title="Главная"
-        description="Операционная сводка CMS: состояние контента, заявок и медиатеки, а также действия, которые требуют внимания."
+        description="Сборки фич, контент, заявки и публикации сайта в dev и prod."
         actions={
           <>
             <Button variant="outline" asChild>
               <Link to="/features">
                 <Layers />
-                Все Features
+                Все разделы
               </Link>
             </Button>
             <Button asChild>
-              <Link to="/features/new">
+              <Link to="/site">
                 <Plus />
-                Создать Feature
+                Сборки и страницы
               </Link>
             </Button>
           </>
@@ -155,12 +162,12 @@ export default function DashboardPage() {
                     <h2 className="text-sm font-semibold">Сводка недоступна</h2>
                     <p className="mt-1 max-w-2xl text-sm leading-6 text-muted-foreground">
                       Endpoint <code className="text-xs">GET /api/v1/admin/overview</code>{" "}
-                      ещё не подключён на этом backend. Мы не показываем вымышленные
+                      ещё не подключён на сервере. Мы не показываем вымышленные
                       цифры и активность. Разделы CMS при этом полностью доступны.
                     </p>
                     <div className="mt-4 flex flex-wrap gap-2">
                       <Button asChild size="sm">
-                        <Link to="/features">Перейти к Features</Link>
+                        <Link to="/features">Перейти к разделам</Link>
                       </Button>
                       <Button asChild size="sm" variant="outline">
                         <Link to="/submissions">Открыть заявки</Link>
@@ -177,12 +184,12 @@ export default function DashboardPage() {
                 <EmptyState
                   icon={Sparkles}
                   title="Начните работу с CMS"
-                  description="Создайте Feature, определите схему, добавьте запись и опубликуйте контент. После этого здесь появится операционная сводка."
+                  description="Создайте раздел, определите схему, добавьте запись и опубликуйте контент. После этого здесь появится операционная сводка."
                   action={
                     <Button asChild>
-                      <Link to="/features/new">
+                      <Link to="/site">
                         <FilePlus2 />
-                        Создать первую Feature
+                        Собрать сайт из фич
                       </Link>
                     </Button>
                   }
@@ -193,10 +200,10 @@ export default function DashboardPage() {
                     <h2 className="text-sm font-semibold">Доступные разделы</h2>
                     <div className="mt-3 space-y-2">
                       {[
-                        ["Features", "Схемы и контент", "/features"],
+                        ["Разделы", "Схемы и контент", "/features"],
                         ["Заявки", "Обработка форм", "/submissions"],
                         ["Медиа", "Загрузки и медиатека", "/media"],
-                        ["Сайт", "Релизы и среды", "/releases"],
+                        ["Сайт", "Страницы и снапшоты", "/site"],
                         ["Токены", "Доступы и роли", "/access/tokens"],
                       ].map(([title, text, to]) => (
                         <Link
@@ -284,7 +291,7 @@ export default function DashboardPage() {
                 {attention?.draft_features.map((feature) => (
                   <Link
                     key={`feature-${feature.id}`}
-                    to={`/features/${feature.id}/schema`}
+                    to={`/features/${feature.id}/content`}
                     className="flex items-start gap-3 px-4 py-3 transition-colors hover:bg-muted/40 sm:px-5"
                   >
                     <CircleDashed className="mt-0.5 h-4 w-4 shrink-0 text-warning" />
@@ -370,7 +377,7 @@ export default function DashboardPage() {
                             <Icon className="h-3.5 w-3.5 text-muted-foreground" />
                           </span>
                           <span className="min-w-0 flex-1">
-                            <span className="block truncate text-sm">{item.title}</span>
+                            <span className="block truncate text-sm">{activityTitle(item)}</span>
                             <span className="mt-0.5 block text-xs text-muted-foreground">
                               {meta.label}
                               {item.feature_key ? (
@@ -397,10 +404,10 @@ export default function DashboardPage() {
               <h2 className="text-sm font-semibold">Быстрый старт</h2>
               <ol className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
                 {[
-                  ["1", "Создать Feature", "Коллекция, Single или форма", "/features/new"],
-                  ["2", "Определить схему", "Визуальный конструктор полей", "/features"],
-                  ["3", "Добавить запись", "Блочный редактор контента", "/features"],
-                  ["4", "Опубликовать", "Отдельно от черновика", "/features"],
+                  ["1", "Загрузить фичи", "Импортировать ZIP-сборки с манифестами", "/site"],
+                  ["2", "Собрать страницы", "Настроить маршруты и размещения", "/site"],
+                  ["3", "Добавить контент", "Заполнить поля из манифестов", "/features"],
+                  ["4", "Опубликовать снапшот", "Проверить dev и продвинуть в prod", "/site"],
                 ].map(([step, title, text, to]) => (
                   <li key={step}>
                     <Link
@@ -425,7 +432,7 @@ export default function DashboardPage() {
 
       {counts && (
         <p className="mt-6 text-2xs text-muted-foreground">
-          Всего Feature: {counts.features_active + counts.features_archived} ·{" "}
+          Всего разделов: {counts.features_active + counts.features_archived} ·{" "}
           {counts.draft_entries}{" "}
           {pluralRu(counts.draft_entries, ["черновик записи", "черновика записей", "черновиков записей"])}{" "}
           · ошибок медиа: {counts.failed_media}

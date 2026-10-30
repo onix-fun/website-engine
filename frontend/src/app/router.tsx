@@ -8,17 +8,14 @@ import {
 import { useAuth } from "@/app/auth";
 import { AppShell } from "@/app/layouts/AppShell";
 import { LoginPage, NoAccessScreen } from "@/app/pages/LoginPage";
-import { RouteErrorPage } from "@/app/pages/NotFoundPage";
+import NotFoundPage, { RouteErrorPage } from "@/app/pages/NotFoundPage";
 import { LoadingPage } from "@/components/common/page";
 
 const DashboardPage = lazy(() => import("@/pages/dashboard/DashboardPage"));
 const FeaturesPage = lazy(() => import("@/pages/features/FeaturesPage"));
-const NewFeaturePage = lazy(() => import("@/pages/features/NewFeaturePage"));
 const FeatureLayout = lazy(() => import("@/pages/features/FeatureLayout"));
-const FeatureSchemaPage = lazy(() => import("@/pages/features/FeatureSchemaPage"));
 const FeatureContentPage = lazy(() => import("@/pages/features/FeatureContentPage"));
 const ContentEditorPage = lazy(() => import("@/pages/features/ContentEditorPage"));
-const FeatureSettingsPage = lazy(() => import("@/pages/features/FeatureSettingsPage"));
 const SubmissionsPage = lazy(() => import("@/pages/submissions/SubmissionsPage"));
 const MediaPage = lazy(() => import("@/pages/media/MediaPage"));
 const AccessLayout = lazy(() => import("@/pages/access/AccessLayout"));
@@ -26,11 +23,8 @@ const TokensPage = lazy(() => import("@/pages/access/TokensPage"));
 const UsersPage = lazy(() => import("@/pages/access/UsersPage"));
 const RolesPage = lazy(() => import("@/pages/access/RolesPage"));
 const SettingsPage = lazy(() => import("@/pages/settings/SettingsPage"));
-const ReleasesPage = lazy(() => import("@/pages/releases/ReleasesPage"));
-const EnvironmentSettingsPage = lazy(
-  () => import("@/pages/releases/EnvironmentSettingsPage"),
-);
-const NotFoundPage = lazy(() => import("@/app/pages/NotFoundPage"));
+const SiteBuilderPage = lazy(() => import("@/pages/site/SiteBuilderPage"));
+const EnvironmentSettingsPage = lazy(() => import("@/pages/settings/EnvironmentSettingsPage"));
 
 function RequireAuth() {
   const auth = useAuth();
@@ -105,32 +99,26 @@ export const router = createBrowserRouter(
           children: [
             { index: true, element: <DashboardPage /> },
             { path: "features", element: <FeaturesPage /> },
-            {
-              element: <RequireStaff />,
-              children: [{ path: "features/new", element: <NewFeaturePage /> }],
-            },
+            { path: "features/new", element: <Navigate to="/site" replace /> },
             {
               path: "features/:featureId",
               element: <FeatureLayout />,
               children: [
-                { index: true, element: <Navigate to="schema" replace /> },
-                { path: "schema", element: <FeatureSchemaPage /> },
+                { index: true, element: <Navigate to="content" replace /> },
+                { path: "schema", element: <Navigate to="../content" replace /> },
+                { path: "settings", element: <Navigate to="../content" replace /> },
                 { path: "content", element: <FeatureContentPage /> },
                 { path: "content/new", element: <ContentEditorPage /> },
                 { path: "content/:entryId", element: <ContentEditorPage /> },
-                {
-                  path: "settings",
-                  element: (
-                    <RequireStaff>
-                      <FeatureSettingsPage />
-                    </RequireStaff>
-                  ),
-                },
               ],
             },
             { path: "submissions", element: <SubmissionsPage /> },
             { path: "submissions/:submissionId", element: <SubmissionsPage /> },
             { path: "media", element: <MediaPage /> },
+            {
+              element: <RequireStaff />,
+              children: [{ path: "site", element: <SiteBuilderPage /> }],
+            },
             {
               element: <RequireStaff />,
               children: [{
@@ -144,17 +132,13 @@ export const router = createBrowserRouter(
               ],
             }],
             },
-            { path: "releases", element: <ReleasesPage /> },
-            {
-              element: <RequireStaff />,
-              children: [{
-                path: "releases/environments/:envKey",
-                element: <EnvironmentSettingsPage />,
-              }],
-            },
             {
               element: <RequireStaff />,
               children: [{ path: "settings", element: <SettingsPage /> }],
+            },
+            {
+              element: <RequireStaff />,
+              children: [{ path: "settings/environments/:envKey", element: <EnvironmentSettingsPage /> }],
             },
             { path: "*", element: <NotFoundPage /> },
           ],

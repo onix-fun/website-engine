@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type ChangeEvent } from "react";
 import {
   useInfiniteQuery,
   useMutation,
@@ -12,6 +12,7 @@ import {
   ChevronDown,
   Eye,
   EyeOff,
+  FileUp,
   GitCompareArrows,
   Layers,
   MoreHorizontal,
@@ -46,7 +47,7 @@ import {
 } from "@/domains/content-editor/blocks";
 import { DiffList, DiffSummaryBadges } from "@/domains/versioning/DiffView";
 import { diffJson } from "@/domains/versioning/diff";
-import { parsedSchema } from "@/domains/schema-builder/schema";
+import { parsedSchema } from "@/domains/content-schema/schema";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox, Input } from "@/components/ui/input";
@@ -134,6 +135,8 @@ export default function FeatureContentPage() {
   const [selected, setSelected] = useState<string[]>([]);
   const [previewEntry, setPreviewEntry] = useState<EntryDetail | null>(null);
   const [compareEntry, setCompareEntry] = useState<EntryDetail | null>(null);
+  const importInput = useRef<HTMLInputElement>(null);
+  const [importing, setImporting] = useState(false);
 
   useDocumentTitle(`Контент — ${feature.name}`);
 
@@ -239,7 +242,7 @@ export default function FeatureContentPage() {
       }
       return new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime();
     });
-  }, [loadedEntries, sort, state]);
+  }, [fields, loadedEntries, sort, state]);
 
   const selectedEntries = useMemo(
     () => loadedEntries.filter((entry) => selected.includes(entry.id)),
@@ -376,6 +379,30 @@ export default function FeatureContentPage() {
     update({ q: null, state: null, sort: null, archived: null });
   };
 
+  const handleImportFile = async (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.currentTarget.files?.[0];
+    event.currentTarget.value = "";
+    if (!file) return;
+    setImporting(true);
+    try {
+      const parsed: unknown = JSON.parse(await file.text());
+      const records = Array.isArray(parsed) ? parsed : [parsed];
+      if (records.length === 0 || records.some((record) =>
+        !record || typeof record !== "object" || Array.isArray(record),
+      )) {
+        throw new Error("Файл должен содержать объект или непустой массив объектов.");
+      }
+      const result = await api.entries.import(feature.id, parsed as JsonObject | JsonObject[]);
+      await queryClient.invalidateQueries({ queryKey: queryKeys.entries.list(feature.id) });
+      await queryClient.invalidateQueries({ queryKey: queryKeys.overview });
+      toast.success(`Создано черновиков: ${result.imported}`);
+    } catch (error) {
+      toast.error(errorMessage(error));
+    } finally {
+      setImporting(false);
+    }
+  };
+
   // A single feature owns exactly one record, so the table is replaced by the
   // editor itself.
   if (feature.type === "single") {
@@ -395,7 +422,7 @@ export default function FeatureContentPage() {
       <EmptyState
         icon={Layers}
         title="Запись ещё не создана"
-        description="Feature типа single содержит одну запись. Создайте её, чтобы открыть редактор."
+        description="Раздел типа «Одна запись» содержит один материал. Создайте его, чтобы открыть редактор."
         action={
           <Button asChild>
             <Link to={`/features/${feature.id}/content/new`}>
@@ -414,18 +441,32 @@ export default function FeatureContentPage() {
         <div className="min-w-0">
           <h2 className="text-lg font-semibold tracking-tight">Контент</h2>
           <p className="mt-1 text-sm text-muted-foreground">
-            Записи Feature «{feature.name}». Поиск выполняется на сервере, сортировка
+            Записи раздела «{feature.name}». Поиск выполняется на сервере, сортировка
             и фильтр по статусу — по загруженной странице.
           </p>
         </div>
         <div className="flex shrink-0 flex-wrap items-center gap-2">
           {feature.type !== "form" && (
-            <Button asChild>
-              <Link to={`/features/${feature.id}/content/new`}>
-                <Plus />
-                Создать запись
-              </Link>
-            </Button>
+            <>
+              <input
+                ref={importInput}
+                type="file"
+                accept="application/json,.json"
+                className="sr-only"
+                aria-label="Импортировать записи из JSON"
+                onChange={(event) => void handleImportFile(event)}
+              />
+              <Button variant="outline" onClick={() => importInput.current?.click()} loading={importing}>
+                <FileUp />
+                Импорт JSON
+              </Button>
+              <Button asChild>
+                <Link to={`/features/${feature.id}/content/new`}>
+                  <Plus />
+                  Создать запись
+                </Link>
+              </Button>
+            </>
           )}
         </div>
       </div>
@@ -554,7 +595,7 @@ export default function FeatureContentPage() {
       ) : loadedEntries.length === 0 ? (
         <EmptyState
           icon={Layers}
-          title={filtersActive ? "Записи не найдены" : "В Feature пока нет записей"}
+          title={filtersActive ? "Записи не найдены" : "В разделе пока нет записей"}
           description={
             filtersActive
               ? "По заданным условиям ничего не найдено. Сбросьте фильтры или измените запрос."
@@ -769,7 +810,7 @@ export default function FeatureContentPage() {
 
       {feature.type === "form" && (
         <InlineAlert tone="info" title="Для формы используется раздел «Заявки»">
-          Записи Feature типа form создаются публичной формой. Отправки доступны в
+          Записи раздела типа «Форма» создаются публичной формой. Отправки доступны в
           разделе «Заявки».
         </InlineAlert>
       )}

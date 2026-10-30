@@ -71,7 +71,7 @@ export function starterSchema(type: FeatureType): JsonObject {
         },
         email: {
           type: "string",
-          title: "Email",
+          title: "Электронная почта",
           format: "email",
         },
         message: {
@@ -90,7 +90,7 @@ export function starterSchema(type: FeatureType): JsonObject {
   if (type === "single") {
     return {
       $schema: "https://json-schema.org/draft/2020-12/schema",
-      title: "Одиночная страница",
+      title: "Страница",
       type: "object",
       properties: {
         title: { type: "string", title: "Заголовок", minLength: 1 },

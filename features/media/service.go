@@ -38,18 +38,27 @@ func (s *Service) Upload(ctx context.Context, actor principal.Principal, filenam
 	if int64(len(data)) > s.maxUpload {
 		return Media{}, &ValidationError{Message: "Файл превышает допустимый размер"}
 	}
+	filename = sanitizeFilename(filename)
 	contentType := http.DetectContentType(data[:min(len(data), 512)])
+	if strings.EqualFold(filepath.Ext(filename), ".svg") && looksLikeSVG(data) {
+		contentType = "image/svg+xml"
+	}
 	ext, ok := allowedContentTypes[contentType]
 	if !ok {
 		return Media{}, &ValidationError{Message: "Неподдерживаемый тип файла"}
 	}
-	if isImage(contentType) {
+	if contentType == "image/svg+xml" {
+		var err error
+		data, err = sanitizeSVG(data)
+		if err != nil {
+			return Media{}, &ValidationError{Message: "Небезопасный или некорректный SVG-файл"}
+		}
+	}
+	if isRasterImage(contentType) {
 		if _, err := inspectImage(data); err != nil {
 			return Media{}, &ValidationError{Message: "Повреждённое или слишком большое изображение"}
 		}
 	}
-
-	filename = sanitizeFilename(filename)
 	creator := actor.TokenID
 	id := uuid.New()
 	objectKey := fmt.Sprintf("media/%s/original%s", id, ext)
@@ -69,7 +78,7 @@ func (s *Service) Upload(ctx context.Context, actor principal.Principal, filenam
 		return Media{}, fmt.Errorf("upload original: %w", err)
 	}
 	variants := map[string]string{"original": objectKey}
-	if isImage(contentType) {
+	if isRasterImage(contentType) {
 		generated, err := buildImageVariants(ctx, s.store, id.String(), data, contentType)
 		if err != nil {
 			_ = s.repo.SetFailed(context.Background(), id)
@@ -233,7 +242,7 @@ func (s *Service) Retry(ctx context.Context, id uuid.UUID) (Media, error) {
 		return Media{}, fmt.Errorf("%w: cannot read original", ErrProcessing)
 	}
 	variants := map[string]string{"original": m.ObjectKey}
-	if isImage(m.ContentType) {
+	if isRasterImage(m.ContentType) {
 		generated, err := buildImageVariants(ctx, s.store, id.String(), data, m.ContentType)
 		if err != nil {
 			_ = s.repo.SetFailed(context.Background(), id)
@@ -294,7 +303,7 @@ func (s *Service) Ready(ctx context.Context) error {
 	return s.store.Ready(ctx)
 }
 
-func isImage(contentType string) bool {
+func isRasterImage(contentType string) bool {
 	switch contentType {
 	case "image/jpeg", "image/png", "image/gif", "image/webp":
 		return true
@@ -307,6 +316,7 @@ var allowedContentTypes = map[string]string{
 	"image/png":       ".png",
 	"image/gif":       ".gif",
 	"image/webp":      ".webp",
+	"image/svg+xml":   ".svg",
 	"application/pdf": ".pdf",
 	"video/mp4":       ".mp4",
 }

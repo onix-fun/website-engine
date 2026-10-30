@@ -135,6 +135,128 @@ func (s *Service) Create(ctx context.Context, actor principal.Principal, feature
 	return s.Get(ctx, entryID)
 }
 
+// Import atomically imports one object into an existing draft or creates one
+// or more new drafts. Every object is checked against the current manifest
+// schema before the transaction writes any rows.
+func (s *Service) Import(ctx context.Context, actor principal.Principal, featureID uuid.UUID, entryID *uuid.UUID, expectedRevision int64, records []json.RawMessage) ([]Detail, error) {
+	if len(records) == 0 || len(records) > 500 {
+		return nil, &ValidationError{Message: "Импорт должен содержать от 1 до 500 записей"}
+	}
+	if entryID != nil && (len(records) != 1 || expectedRevision < 1) {
+		return nil, &ValidationError{Message: "Для замены текущей записи передайте один объект и его revision"}
+	}
+	for _, data := range records {
+		if err := validateDataObject(data); err != nil {
+			return nil, err
+		}
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+
+	tx, err := s.repo.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = tx.Rollback(context.Background()) }()
+
+	feature, err := s.featureRepo.GetForUpdate(ctx, tx, featureID)
+	if err != nil {
+		return nil, err
+	}
+	if feature.Status == "archived" {
+		return nil, &ConflictError{Message: "Нельзя импортировать записи в архивную Feature"}
+	}
+	if feature.Type == "form" {
+		return nil, &ConflictError{Message: "Импорт записей для form-Feature недоступен"}
+	}
+	if feature.Type == "single" && len(records) > 1 {
+		return nil, &ValidationError{Message: "У single-Feature может быть только одна запись"}
+	}
+	if feature.Type == "single" && entryID == nil {
+		var exists bool
+		if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM feature_entries WHERE feature_id=$1 AND single_slot=TRUE AND archived_at IS NULL)`, featureID).Scan(&exists); err != nil {
+			return nil, err
+		}
+		if exists {
+			return nil, &ConflictError{Message: "У single-Feature уже есть запись. Откройте её и импортируйте JSON из редактора записи"}
+		}
+	}
+	schema, err := s.authoringSchema(ctx, tx, feature)
+	if err != nil {
+		return nil, err
+	}
+	for _, data := range records {
+		if err := s.validateDataVersion(ctx, tx, schema.Schema, data); err != nil {
+			return nil, err
+		}
+	}
+
+	creator := actor.TokenID
+	createdIDs := make([]uuid.UUID, 0, len(records))
+	if entryID != nil {
+		entry, err := s.repo.GetForUpdate(ctx, tx, *entryID)
+		if err != nil {
+			return nil, err
+		}
+		if entry.FeatureID != featureID {
+			return nil, &ConflictError{Message: "Запись принадлежит другой Feature"}
+		}
+		if entry.ArchivedAt != nil {
+			return nil, &ConflictError{Message: "Нельзя импортировать данные в архивную запись"}
+		}
+		if entry.Revision != expectedRevision {
+			return nil, &ConflictError{Message: "Запись изменилась. Обновите страницу и повторите импорт"}
+		}
+		if entry.DraftVersionID != nil {
+			if err := s.repo.UpdateDraftVersion(ctx, tx, *entry.DraftVersionID, schema.ID, records[0]); err != nil {
+				return nil, translateDBError(err)
+			}
+			if err := s.repo.BumpRevision(ctx, tx, entry.ID); err != nil {
+				return nil, translateDBError(err)
+			}
+		} else {
+			number, err := s.repo.NextVersion(ctx, tx, entry.ID)
+			if err != nil {
+				return nil, err
+			}
+			version := Version{ID: uuid.New(), EntryID: entry.ID, Version: number, SchemaVersionID: schema.ID, Data: records[0], CreatedBy: &creator}
+			if err := s.repo.InsertVersion(ctx, tx, version); err != nil {
+				return nil, translateDBError(err)
+			}
+			if err := s.repo.SetDraftPointer(ctx, tx, entry.ID, version.ID, true); err != nil {
+				return nil, translateDBError(err)
+			}
+		}
+		createdIDs = append(createdIDs, entry.ID)
+	} else {
+		for _, data := range records {
+			id, versionID := uuid.New(), uuid.New()
+			entry := Entry{ID: id, FeatureID: featureID, SingleSlot: feature.Type == "single", DraftVersionID: &versionID, CreatedBy: &creator}
+			if err := s.repo.InsertEntry(ctx, tx, entry); err != nil {
+				return nil, translateDBError(err)
+			}
+			version := Version{ID: versionID, EntryID: id, Version: 1, SchemaVersionID: schema.ID, Data: data, CreatedBy: &creator}
+			if err := s.repo.InsertVersion(ctx, tx, version); err != nil {
+				return nil, translateDBError(err)
+			}
+			createdIDs = append(createdIDs, id)
+		}
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, translateDBError(err)
+	}
+	out := make([]Detail, 0, len(createdIDs))
+	for _, id := range createdIDs {
+		detail, err := s.Get(ctx, id)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, detail)
+	}
+	return out, nil
+}
+
 func (s *Service) SaveDraft(ctx context.Context, actor principal.Principal, entryID uuid.UUID, expectedRevision int64, data json.RawMessage) (Detail, error) {
 	if expectedRevision < 1 {
 		return Detail{}, &ValidationError{Message: "revision обязателен"}
@@ -485,6 +607,64 @@ func (s *Service) Archive(ctx context.Context, entryID uuid.UUID) (Detail, error
 		return Detail{}, translateDBError(err)
 	}
 	return s.Get(ctx, entryID)
+}
+
+// Reorder changes the explicit display order of all active records in a
+// collection. The caller must submit the complete set of record IDs so a
+// partial update cannot silently drop records from the order.
+func (s *Service) Reorder(ctx context.Context, featureID uuid.UUID, entryIDs []uuid.UUID) error {
+	if len(entryIDs) == 0 {
+		return &ValidationError{Message: "Порядок коллекции не может быть пустым"}
+	}
+	tx, err := s.repo.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback(context.Background()) }()
+	var featureType string
+	if err := tx.QueryRow(ctx, `SELECT type FROM features WHERE id=$1 AND status='active' FOR UPDATE`, featureID).Scan(&featureType); err != nil {
+		return translateDBError(err)
+	}
+	if featureType != "collection" {
+		return &ValidationError{Message: "Изменять порядок можно только у коллекции"}
+	}
+	rows, err := tx.Query(ctx, `SELECT id FROM feature_entries WHERE feature_id=$1 AND archived_at IS NULL FOR UPDATE`, featureID)
+	if err != nil {
+		return err
+	}
+	existing := make(map[uuid.UUID]bool)
+	for rows.Next() {
+		var id uuid.UUID
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
+			return err
+		}
+		existing[id] = true
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return err
+	}
+	rows.Close()
+	if len(existing) != len(entryIDs) {
+		return &ValidationError{Message: "Нужно указать все активные записи коллекции ровно один раз"}
+	}
+	seen := make(map[uuid.UUID]bool, len(entryIDs))
+	for _, id := range entryIDs {
+		if !existing[id] || seen[id] {
+			return &ValidationError{Message: "Список записей содержит чужие или повторяющиеся ID"}
+		}
+		seen[id] = true
+	}
+	for order, id := range entryIDs {
+		if _, err := tx.Exec(ctx, `UPDATE feature_entries SET sort_order=$3,revision=revision+1,updated_at=now() WHERE id=$1 AND feature_id=$2`, id, featureID, order); err != nil {
+			return translateDBError(err)
+		}
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return translateDBError(err)
+	}
+	return nil
 }
 
 func (s *Service) authoringSchema(ctx context.Context, db DBTX, feature features.Feature) (features.Version, error) {

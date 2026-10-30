@@ -1,6 +1,6 @@
 # API
 
-Базовый префикс: `/api/v1`. Все тела запросов и ответов — JSON UTF-8, кроме загрузки медиа
+Административный CMS API использует `/api/v1`; runtime сайта использует `/api/v2`. Все тела запросов и ответов — JSON UTF-8, кроме загрузки медиа
 (`multipart/form-data`) и CSV-экспорта. Время — RFC 3339 в UTC. Идентификаторы — UUID.
 
 Авторизация административных маршрутов:
@@ -320,8 +320,24 @@ CSV-экспорт учитывает те же фильтры, значения
 
 ## Сайт: релизы и среды
 
+Новый runtime сайта публикуется feature builds и снапшотами через `/api/v2/admin`; полный контракт описан в [docs/FEATURE_SNAPSHOTS.md](FEATURE_SNAPSHOTS.md). Старые routes загрузки целого сайта и git-источников оставлены только на переходный период и не используются runtime-ом. Настройки доменов, TLS и CORS продолжают обслуживаться API сред.
+
+### Feature builds и snapshots (новый runtime)
+
+| Метод | Маршрут | Доступ | Описание |
+| --- | --- | --- | --- |
+| GET | `/api/v2/admin/feature-builds` | user | Неизменяемые сборки фич |
+| POST | `/api/v2/admin/feature-builds` | staff | Импорт ESM ZIP-архива с `manifest.json` |
+| GET/PUT | `/api/v2/admin/site/draft` | user/staff | Читать и сохранять визуальную композицию по revision |
+| GET | `/api/v2/admin/site/snapshots` | user | История и активные указатели dev/prod |
+| POST | `/api/v2/admin/site/snapshots` | staff | Создать снапшот и переключить dev |
+| POST | `/api/v2/admin/site/snapshots/{id}/promote` | admin | Продвинуть тот же снапшот в prod |
+| POST | `/api/v2/admin/site/snapshots/{id}/rollback` | admin | Вернуть dev или prod на снапшот |
+
+Публичный runtime использует `GET /api/v2/runtime?path=...`, коллекции — `/api/v2/content/{key}/records`, формы — `POST /api/v2/forms/{key}/submissions`. Данные runtime и версии фич берутся из активного снапшота.
+
 Неизменяемые zip-артефакты сайта выкатываются в две среды (`dev`, `prod`);
-подробности эксплуатации — в `docs/RELEASES.md`.
+legacy API ниже оставлен на переходный период.
 
 ### Релизы
 
@@ -402,9 +418,9 @@ PATCH — optimistic concurrency: в теле передаётся актуал�
     "submission_export_max_rows": 10000
   },
   "public_api": {
-    "content_path": "/api/v1/content",
-    "entries_path": "/api/v1/content/{key}/entries",
-    "forms_path": "/api/v1/forms/{key}/submissions",
+    "runtime_path": "/api/v2/runtime?path={path}",
+    "collection_path": "/api/v2/content/{key}/records?field={field}&value={value}&offset={offset}&limit={limit}",
+    "forms_path": "/api/v2/forms/{key}/submissions",
     "admin_path": "/api/v1/admin",
     "media_path": "/media/{id}",
     "cors_enabled": true,

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -8,6 +8,7 @@ import {
   CloudUpload,
   Eye,
   FileClock,
+  FileUp,
   History,
   Loader2,
   Monitor,
@@ -78,8 +79,8 @@ import {
 import type { DocumentState } from "@/domains/content-editor/types";
 import { useContentAutosave } from "@/domains/content-editor/useContentAutosave";
 import { useEditorHistory } from "@/domains/content-editor/useEditorHistory";
-import { parsedSchema } from "@/domains/schema-builder/schema";
-import type { SchemaFieldNode } from "@/domains/schema-builder/types";
+import { parsedSchema } from "@/domains/content-schema/schema";
+import type { SchemaFieldNode } from "@/domains/content-schema/types";
 import { DiffList, DiffSummaryBadges } from "@/domains/versioning/DiffView";
 import { diffJson } from "@/domains/versioning/diff";
 
@@ -136,7 +137,15 @@ function collectMediaIds(
   return Array.from(ids);
 }
 
-function SaveStateBadge({ status, dirty }: { status: string; dirty: boolean }) {
+function SaveStateBadge({
+  status,
+  dirty,
+  hasSavedDraft,
+}: {
+  status: string;
+  dirty: boolean;
+  hasSavedDraft: boolean;
+}) {
   if (status === "saving") {
     return (
       <Badge variant="info">
@@ -169,11 +178,13 @@ function SaveStateBadge({ status, dirty }: { status: string; dirty: boolean }) {
       </Badge>
     );
   }
-  return (
+  return hasSavedDraft ? (
     <Badge variant="success">
       <Check className="h-3 w-3" aria-hidden="true" />
       Сохранено
     </Badge>
+  ) : (
+    <Badge variant="muted">Черновик отсутствует</Badge>
   );
 }
 
@@ -227,6 +238,8 @@ export default function ContentEditorPage() {
     null,
   );
   const [blockWarnings, setBlockWarnings] = useState<string[]>([]);
+  const importInput = useRef<HTMLInputElement>(null);
+  const [importing, setImporting] = useState(false);
 
   const data = useMemo(
     () =>
@@ -503,6 +516,49 @@ export default function ContentEditorPage() {
     }
   };
 
+  const handleImportFile = async (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.currentTarget.files?.[0];
+    event.currentTarget.value = "";
+    if (!file) return;
+    setImporting(true);
+    try {
+      const parsed: unknown = JSON.parse(await file.text());
+      if (Array.isArray(parsed)) {
+        if (parsed.length === 0 || parsed.some((item) => !isRecord(item))) {
+          throw new Error("Массив должен содержать хотя бы один объект записи.");
+        }
+        const result = await api.entries.import(feature.id, parsed as JsonObject[]);
+        await queryClient.invalidateQueries({ queryKey: queryKeys.entries.list(feature.id) });
+        toast.success(`Создано черновиков: ${result.imported}`);
+        navigate(`/features/${feature.id}/content`, { replace: true });
+        return;
+      }
+      if (!isRecord(parsed)) throw new Error("Файл должен содержать JSON-объект или массив объектов.");
+      const result = await api.entries.import(
+        feature.id,
+        parsed as JsonObject,
+        entryId,
+        entryId ? autosave.getRevision() : undefined,
+      );
+      const imported = result.items[0];
+      if (!imported) throw new Error("Сервер не вернул импортированную запись.");
+      queryClient.setQueryData(queryKeys.entries.detail(imported.id), imported);
+      void queryClient.invalidateQueries({ queryKey: queryKeys.entries.list(feature.id) });
+      await queryClient.invalidateQueries({ queryKey: queryKeys.overview });
+      guardBypassRef.current = true;
+      if (entryId) {
+        applySeed(stateFromData(imported.draft?.data ?? null), imported.id, imported.revision);
+      } else {
+        navigate(`/features/${feature.id}/content/${imported.id}`, { replace: true });
+      }
+      toast.success("JSON проверен и загружен в черновик");
+    } catch (error) {
+      toast.error(errorMessage(error));
+    } finally {
+      setImporting(false);
+    }
+  };
+
   /**
    * Conflict resolution. Both options first read the current server state:
    * "reload" discards the local changes, "keep mine" re-sends the local
@@ -624,7 +680,7 @@ export default function ContentEditorPage() {
     return (
       <ErrorState
         error={schemaQuery.error}
-        title="Не удалось загрузить схему Feature"
+        title="Не удалось загрузить схему раздела"
         onRetry={() => void schemaQuery.refetch()}
       />
     );
@@ -680,7 +736,11 @@ export default function ContentEditorPage() {
               <h1 className="truncate text-base font-semibold">
                 {isNew ? "Новая запись" : title}
               </h1>
-              <SaveStateBadge status={autosave.status} dirty={dirty} />
+              <SaveStateBadge
+                status={autosave.status}
+                dirty={dirty}
+                hasSavedDraft={Boolean(entry?.draft || autosave.lastSavedAt)}
+              />
               {entry?.dev && (
                 <Badge variant="secondary">dev v{entry.dev.version}</Badge>
               )}
@@ -704,6 +764,24 @@ export default function ContentEditorPage() {
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
+            <input
+              ref={importInput}
+              type="file"
+              accept="application/json,.json"
+              className="sr-only"
+              aria-label="Импортировать контент из JSON"
+              onChange={(event) => void handleImportFile(event)}
+            />
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => importInput.current?.click()}
+              loading={importing}
+              disabled={archived || importing}
+            >
+              <FileUp />
+              Импорт JSON
+            </Button>
             <Button
               variant={preview ? "secondary" : "outline"}
               size="sm"
@@ -853,7 +931,7 @@ export default function ContentEditorPage() {
                 </Button>
               }
             >
-              {errorMessage(autosave.error)}. Изменения остались в редакторе.
+              {errorMessage(autosave.error)} Изменения остались в редакторе.
             </InlineAlert>
           </div>
         )}
@@ -863,7 +941,7 @@ export default function ContentEditorPage() {
             <InlineAlert tone="warning" title="Редактирование заблокировано">
               {entry?.archived_at
                 ? "Запись в архиве. Снимите её с архива, чтобы продолжить редактирование."
-                : "Feature в архиве. Снимите Feature с архива в настройках, чтобы продолжить работу."}
+                : "Раздел в архиве. Снимите его с архива в настройках, чтобы продолжить работу."}
             </InlineAlert>
           </div>
         )}
