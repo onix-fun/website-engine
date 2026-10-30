@@ -124,6 +124,10 @@ func NewRouter(d Deps) http.Handler {
 		mux.Handle("GET /api/v2/admin/content/features", user(d.SiteSnapshots.ContentCatalog))
 		mux.Handle("GET /api/v2/admin/site/draft", siteManager(d.SiteSnapshots.Draft))
 		mux.Handle("PUT /api/v2/admin/site/draft", jsonSiteManager(d.SiteSnapshots.SaveDraft))
+		mux.Handle("GET /api/v2/admin/site/metadata", user(d.SiteSnapshots.Metadata))
+		mux.Handle("PUT /api/v2/admin/site/metadata", jsonUser(d.SiteSnapshots.SaveMetadata))
+		mux.Handle("POST /api/v2/admin/site/metadata/publish", user(d.SiteSnapshots.PublishMetadata))
+		mux.Handle("POST /api/v2/admin/site/metadata/promote", jsonSiteManager(d.SiteSnapshots.PromoteMetadata))
 		mux.Handle("GET /api/v2/admin/site/snapshots", siteManager(d.SiteSnapshots.List))
 		mux.Handle("POST /api/v2/admin/site/snapshots", jsonSiteManager(d.SiteSnapshots.Publish))
 		mux.Handle("POST /api/v2/admin/site/snapshots/{id}/promote", jsonSiteManager(d.SiteSnapshots.Promote))
@@ -319,7 +323,14 @@ func NewPublicRouter(d Deps, env environment.Environment) http.Handler {
 	// The engine always serves its embedded runtime shell. Published snapshots
 	// supply the composition and feature assets; the old full-site release
 	// handler is intentionally not part of this runtime path.
-	mux.Handle("/", publicruntime.Handler(d.S3PublicBaseURL))
+	if d.SiteSnapshots != nil {
+		resolver := publicruntime.ShellResolver(func(ctx context.Context, requestPath string) ([]byte, bool, error) {
+			return d.SiteSnapshots.HTMLShell(ctx, env, requestPath)
+		})
+		mux.Handle("/", publicruntime.Handler(d.S3PublicBaseURL, resolver))
+	} else {
+		mux.Handle("/", publicruntime.Handler(d.S3PublicBaseURL))
+	}
 
 	handler := middleware.RequestID(mux)
 	handler = middleware.SecurityHeaders(handler)

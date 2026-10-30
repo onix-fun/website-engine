@@ -316,7 +316,7 @@ export default function FeaturesPage() {
               <Link to="/submissions">Заявки</Link>
             </Button>
             <Button asChild>
-              <Link to="/site">
+              <Link to="/site/features">
                 <Plus />
                 Сборки фич и страницы
               </Link>

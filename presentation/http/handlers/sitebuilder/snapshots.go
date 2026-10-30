@@ -1,10 +1,12 @@
 package sitebuilder
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 
@@ -54,6 +56,59 @@ func (h *SnapshotsHandler) SaveDraft(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	state, err := h.service.SaveDraft(r.Context(), actor.TokenID, req.Revision, req.Config)
+	if err != nil {
+		h.writeError(w, r, err)
+		return
+	}
+	response.JSON(w, http.StatusOK, state)
+}
+
+func (h *SnapshotsHandler) Metadata(w http.ResponseWriter, r *http.Request) {
+	state, err := h.service.GetMetadata(r.Context())
+	if err != nil {
+		h.writeError(w, r, err)
+		return
+	}
+	response.JSON(w, http.StatusOK, state)
+}
+
+type saveMetadataRequest struct {
+	Revision int64           `json:"revision"`
+	Metadata json.RawMessage `json:"metadata"`
+}
+
+func (h *SnapshotsHandler) SaveMetadata(w http.ResponseWriter, r *http.Request) {
+	actor, _ := principal.FromContext(r.Context())
+	var req saveMetadataRequest
+	if err := response.DecodeJSON(w, r, &req, h.maxJSON); err != nil {
+		response.WriteDecodeError(w, r, err)
+		return
+	}
+	if len(req.Metadata) == 0 {
+		response.Error(w, r, http.StatusBadRequest, "invalid_metadata", "Metadata is required")
+		return
+	}
+	state, err := h.service.SaveMetadata(r.Context(), actor.TokenID, req.Revision, req.Metadata)
+	if err != nil {
+		h.writeError(w, r, err)
+		return
+	}
+	response.JSON(w, http.StatusOK, state)
+}
+
+func (h *SnapshotsHandler) PublishMetadata(w http.ResponseWriter, r *http.Request) {
+	actor, _ := principal.FromContext(r.Context())
+	state, err := h.service.PublishMetadata(r.Context(), actor.TokenID)
+	if err != nil {
+		h.writeError(w, r, err)
+		return
+	}
+	response.JSON(w, http.StatusOK, state)
+}
+
+func (h *SnapshotsHandler) PromoteMetadata(w http.ResponseWriter, r *http.Request) {
+	actor, _ := principal.FromContext(r.Context())
+	state, err := h.service.PromoteMetadata(r.Context(), actor.TokenID)
 	if err != nil {
 		h.writeError(w, r, err)
 		return
@@ -147,12 +202,25 @@ func (h *SnapshotsHandler) Runtime(w http.ResponseWriter, r *http.Request) {
 	if requestPath == "" {
 		requestPath = "/"
 	}
-	composition, err := h.service.Runtime(r.Context(), environment.FromContext(r.Context()), requestPath)
+	query := url.Values{}
+	if search := r.URL.Query().Get("search"); search != "" {
+		var err error
+		query, err = url.ParseQuery(search)
+		if err != nil {
+			response.Error(w, r, http.StatusBadRequest, "invalid_search", "Search parameters are invalid")
+			return
+		}
+	}
+	composition, err := h.service.Runtime(r.Context(), environment.FromContext(r.Context()), requestPath, query)
 	if err != nil {
 		h.writePublicError(w, r, err)
 		return
 	}
 	response.JSON(w, http.StatusOK, composition)
+}
+
+func (h *SnapshotsHandler) HTMLShell(ctx context.Context, env environment.Environment, requestPath string) ([]byte, bool, error) {
+	return h.service.HTMLShell(ctx, env, requestPath)
 }
 
 func (h *SnapshotsHandler) ContentCatalog(w http.ResponseWriter, r *http.Request) {

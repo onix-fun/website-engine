@@ -121,7 +121,7 @@ func newTestEnv(t *testing.T) *testEnv {
 	if err := postgres.Migrate(ctx, pool, migrations.FS); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
-	if _, err := pool.Exec(ctx, `TRUNCATE site_snapshot_content, site_snapshot_events, site_snapshots,
+	if _, err := pool.Exec(ctx, `TRUNCATE site_html_shells, site_metadata_state, site_snapshot_content, site_snapshot_events, site_snapshots,
 		site_draft_config, feature_builds, media_objects, form_submissions, feature_entry_versions,
 		feature_entries, feature_versions, features, access_tokens, content_publication_events,
 		release_events, site_releases, site_environments, release_sources, site_settings

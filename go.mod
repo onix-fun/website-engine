@@ -9,14 +9,13 @@ require (
 	github.com/aws/aws-sdk-go-v2/credentials v1.17.62
 	github.com/aws/aws-sdk-go-v2/service/s3 v1.78.1
 	github.com/aws/smithy-go v1.22.2
+	github.com/dlclark/regexp2 v1.12.0
 	github.com/google/uuid v1.6.0
 	github.com/jackc/pgx/v5 v5.7.2
 	github.com/lib/pq v1.10.9
 	github.com/santhosh-tekuri/jsonschema/v5 v5.3.1
 	golang.org/x/crypto v0.58.0
 	golang.org/x/image v0.24.0
-	gorm.io/driver/postgres v1.6.0
-	gorm.io/gorm v1.31.2
 )
 
 require (
@@ -37,15 +36,12 @@ require (
 	github.com/aws/aws-sdk-go-v2/service/ssooidc v1.29.1 // indirect
 	github.com/aws/aws-sdk-go-v2/service/sts v1.33.17 // indirect
 	github.com/bmatcuk/doublestar v1.3.4 // indirect
-	github.com/dlclark/regexp2 v1.12.0 // indirect
 	github.com/go-openapi/inflect v0.19.0 // indirect
 	github.com/google/go-cmp v0.7.0 // indirect
 	github.com/hashicorp/hcl/v2 v2.13.0 // indirect
 	github.com/jackc/pgpassfile v1.0.0 // indirect
 	github.com/jackc/pgservicefile v0.0.0-20240606120523-5a60cdf6a761 // indirect
 	github.com/jackc/puddle/v2 v2.2.2 // indirect
-	github.com/jinzhu/inflection v1.0.0 // indirect
-	github.com/jinzhu/now v1.1.5 // indirect
 	github.com/mitchellh/go-wordwrap v0.0.0-20150314170334-ad45545899c7 // indirect
 	github.com/rogpeppe/go-internal v1.16.0 // indirect
 	github.com/zclconf/go-cty v1.14.4 // indirect

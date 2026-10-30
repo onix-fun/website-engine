@@ -24,7 +24,12 @@ const TokensPage = lazy(() => import("@/pages/access/TokensPage"));
 const UsersPage = lazy(() => import("@/pages/access/UsersPage"));
 const RolesPage = lazy(() => import("@/pages/access/RolesPage"));
 const SettingsPage = lazy(() => import("@/pages/settings/SettingsPage"));
-const SiteBuilderPage = lazy(() => import("@/pages/site/SiteBuilderPage"));
+const RouterPage = lazy(() => import("@/pages/site/RouterPage"));
+const FeatureRegistryPage = lazy(() => import("@/pages/site/FeatureRegistryPage"));
+const PageEditorPage = lazy(() => import("@/pages/site/PageEditorPage"));
+const SnapshotsPage = lazy(() => import("@/pages/site/SnapshotsPage"));
+const SiteWorkspace = lazy(() => import("@/pages/site/SiteWorkspace").then((module) => ({ default: module.SiteWorkspace })));
+const SiteMetadataPage = lazy(() => import("@/pages/content/SiteMetadataPage"));
 const EnvironmentSettingsPage = lazy(() => import("@/pages/settings/EnvironmentSettingsPage"));
 
 function RequireAuth() {
@@ -100,6 +105,7 @@ export const router = createBrowserRouter(
           children: [
             { index: true, element: <DashboardPage /> },
             { path: "content", element: <ContentHomePage /> },
+            { path: "site-metadata", element: <SiteMetadataPage /> },
             { path: "features/new", element: <NotFoundPage /> },
             {
               path: "features/:featureId",
@@ -119,7 +125,17 @@ export const router = createBrowserRouter(
             { path: "media", element: <MediaPage /> },
             {
               element: <RequireSiteManager />,
-              children: [{ path: "site", element: <SiteBuilderPage /> }],
+              children: [{
+                path: "site",
+                element: <SiteWorkspace />,
+                children: [
+                  { index: true, element: <Navigate to="pages" replace /> },
+                  { path: "router", element: <RouterPage /> },
+                  { path: "features", element: <FeatureRegistryPage /> },
+                  { path: "pages", element: <PageEditorPage /> },
+                  { path: "snapshots", element: <SnapshotsPage /> },
+                ],
+              }],
             },
             {
               element: <RequireSiteManager />,

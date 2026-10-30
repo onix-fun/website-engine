@@ -211,7 +211,7 @@ type FeatureBuild struct {
 	FeatureID                 UUID      `gorm:"column:feature_id;not null;uniqueIndex:uq_feature_builds_feature_version,priority:1;uniqueIndex:uq_feature_builds_identity,priority:2;index:idx_feature_builds_feature,priority:1"`
 	Version                   string    `gorm:"column:version;not null;uniqueIndex:uq_feature_builds_feature_version,priority:2"`
 	SchemaVersionID           UUID      `gorm:"column:schema_version_id;not null;index:idx_feature_builds_schema"`
-	SettingsSchemaVersionID  *UUID     `gorm:"column:settings_schema_version_id"`
+	SettingsSchemaVersionID   *UUID     `gorm:"column:settings_schema_version_id"`
 	SubmissionSchemaVersionID *UUID     `gorm:"column:submission_schema_version_id"`
 	Digest                    string    `gorm:"column:digest;not null;uniqueIndex:uq_feature_builds_digest"`
 	ArtifactSize              int64     `gorm:"column:artifact_size;not null"`
@@ -274,6 +274,33 @@ type SiteSnapshotContent struct {
 
 func (SiteSnapshotContent) TableName() string { return "site_snapshot_content" }
 
+// SiteMetadataState holds the independent draft/dev/prod SEO metadata.
+type SiteMetadataState struct {
+	ID           bool      `gorm:"column:id;primaryKey;not null;default:true"`
+	Revision     int64     `gorm:"column:revision;not null;default:1"`
+	DevRevision  int64     `gorm:"column:dev_revision;not null;default:0"`
+	ProdRevision int64     `gorm:"column:prod_revision;not null;default:0"`
+	Draft        JSONB     `gorm:"column:draft;not null"`
+	Dev          JSONB     `gorm:"column:dev;not null"`
+	Prod         JSONB     `gorm:"column:prod;not null"`
+	UpdatedBy    *UUID     `gorm:"column:updated_by"`
+	UpdatedAt    time.Time `gorm:"column:updated_at;not null;default:now();autoUpdateTime"`
+}
+
+func (SiteMetadataState) TableName() string { return "site_metadata_state" }
+
+// SiteHTMLShell is the pre-rendered static document for an active snapshot route.
+type SiteHTMLShell struct {
+	Environment      string    `gorm:"column:environment;primaryKey;not null"`
+	SnapshotID       UUID      `gorm:"column:snapshot_id;primaryKey;not null"`
+	RouteID          string    `gorm:"column:route_id;primaryKey;not null"`
+	MetadataRevision int64     `gorm:"column:metadata_revision;not null"`
+	HTML             string    `gorm:"column:html;not null"`
+	CreatedAt        time.Time `gorm:"column:created_at;not null;default:now()"`
+}
+
+func (SiteHTMLShell) TableName() string { return "site_html_shells" }
+
 // ReleaseEvent is a row of the release_events table.
 type ReleaseEvent struct {
 	ID           UUID      `gorm:"column:id;primaryKey;not null"`
@@ -309,5 +336,7 @@ func All() []any {
 		&SiteSnapshot{},
 		&SiteSnapshotEvent{},
 		&SiteSnapshotContent{},
+		&SiteMetadataState{},
+		&SiteHTMLShell{},
 	}
 }

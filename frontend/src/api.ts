@@ -28,6 +28,8 @@ import type {
   SiteEnvironment,
   SiteConfig,
   SiteDraftState,
+  SiteMetadata,
+  SiteMetadataState,
   SiteSnapshot,
   SiteSnapshotList,
   Submission,
@@ -86,13 +88,23 @@ function normalizeSiteDraft(draft: SiteDraftState): SiteDraftState {
     ...draft,
     config: {
       ...config,
-      formatVersion: 1,
+      formatVersion: 2,
       pages: arrayOrEmpty(config?.pages).map((page) => ({
         ...page,
         placements: arrayOrEmpty(page?.placements),
       })),
-      routes: arrayOrEmpty(config?.routes),
+      routeTree: normalizeRouteTree(config?.routeTree),
     },
+  };
+}
+
+function normalizeRouteTree(node: SiteConfig["routeTree"] | null | undefined): SiteConfig["routeTree"] {
+  if (!node || typeof node !== "object") {
+    return { id: "root", type: "index", pageId: "home", children: [] };
+  }
+  return {
+    ...node,
+    children: arrayOrEmpty(node.children).map((child) => normalizeRouteTree(child)),
   };
 }
 
@@ -721,6 +733,21 @@ export const api = {
         body: { revision, config },
       });
       return normalizeSiteDraft(draft);
+    },
+    metadata(signal?: AbortSignal): Promise<SiteMetadataState> {
+      return request<SiteMetadataState>(`${ADMIN_V2_ROOT}/site/metadata`, { signal });
+    },
+    saveMetadata(revision: number, metadata: SiteMetadata): Promise<SiteMetadataState> {
+      return request<SiteMetadataState>(`${ADMIN_V2_ROOT}/site/metadata`, {
+        method: "PUT",
+        body: { revision, metadata },
+      });
+    },
+    publishMetadata(): Promise<SiteMetadataState> {
+      return request<SiteMetadataState>(`${ADMIN_V2_ROOT}/site/metadata/publish`, { method: "POST", body: {} });
+    },
+    promoteMetadata(): Promise<SiteMetadataState> {
+      return request<SiteMetadataState>(`${ADMIN_V2_ROOT}/site/metadata/promote`, { method: "POST", body: {} });
     },
     async snapshots(signal?: AbortSignal): Promise<SiteSnapshotList> {
       const snapshots = await request<SiteSnapshotList>(`${ADMIN_V2_ROOT}/site/snapshots`, { signal });

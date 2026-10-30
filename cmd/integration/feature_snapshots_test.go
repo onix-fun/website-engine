@@ -78,15 +78,14 @@ func objectSchema(properties map[string]any, required ...string) map[string]any 
 
 func singlePageConfig(key, version string) map[string]any {
 	return map[string]any{
-		"formatVersion": 1,
-		"documentTitle": "Snapshot test",
+		"formatVersion": 2,
 		"pages": []any{map[string]any{
 			"id": "home", "name": "Home", "kind": "page",
 			"placements": []any{map[string]any{
 				"id": "single", "build": map[string]any{"featureKey": key, "version": version}, "slot": "main",
 			}},
 		}},
-		"routes": []any{map[string]any{"id": "home", "pattern": "^/$", "pageId": "home"}},
+		"routeTree": map[string]any{"id": "root", "type": "index", "pageId": "home"},
 	}
 }
 
@@ -257,11 +256,11 @@ func TestSnapshotPinnedFormSchemaAndPersistentSubmissions(t *testing.T) {
 	key := "snapshot-contact-form"
 	formConfig := func(version string) map[string]any {
 		return map[string]any{
-			"formatVersion": 1,
+			"formatVersion": 2,
 			"pages": []any{map[string]any{"id": "home", "name": "Home", "kind": "page", "placements": []any{map[string]any{
 				"id": "form", "build": map[string]any{"featureKey": key, "version": version}, "slot": "main",
 			}}}},
-			"routes": []any{map[string]any{"id": "home", "pattern": "^/$", "pageId": "home"}},
+			"routeTree": map[string]any{"id": "root", "type": "index", "pageId": "home"},
 		}
 	}
 	manifestV1 := manifestFor(key, "1.0.0", "form", objectSchema(map[string]any{"name": map[string]any{"type": "string", "minLength": 1}}, "name"))
@@ -388,7 +387,7 @@ func TestCollectionRuntimeFiltersAndResolvesDetailRoutes(t *testing.T) {
 	}
 
 	config := map[string]any{
-		"formatVersion": 1,
+		"formatVersion": 2,
 		"pages": []any{
 			map[string]any{"id": "catalog", "name": "Catalog", "kind": "collection-list", "placements": []any{map[string]any{
 				"id": "products", "build": map[string]any{"featureKey": collectionKey, "version": "1.0.0"}, "slot": "main",
@@ -396,14 +395,15 @@ func TestCollectionRuntimeFiltersAndResolvesDetailRoutes(t *testing.T) {
 			}}},
 			map[string]any{"id": "product", "name": "Product", "kind": "detail", "placements": []any{map[string]any{
 				"id": "product-detail", "build": map[string]any{"featureKey": detailKey, "version": "1.0.0"}, "slot": "main",
-				"arguments":        map[string]any{"slug": map[string]any{"source": "route", "routeArg": "slug"}},
+				"arguments":        map[string]any{"slug": map[string]any{"source": "path", "pathArg": "slug"}},
 				"collectionSource": map[string]any{"featureKey": collectionKey, "version": "1.0.0", "field": "slug", "argument": "slug"},
 			}}},
 		},
-		"routes": []any{
-			map[string]any{"id": "catalog", "pattern": "^/$", "pageId": "catalog"},
-			map[string]any{"id": "product-detail", "pattern": "^/product/(?<slug>[a-z0-9-]+)$", "pageId": "product"},
-		},
+		"routeTree": map[string]any{"id": "root", "type": "index", "pageId": "catalog", "children": []any{
+			map[string]any{"id": "product", "type": "static", "value": "product", "children": []any{
+				map[string]any{"id": "product-detail", "type": "regex", "pattern": `(?<slug>[a-z0-9-]+)`, "pageId": "product"},
+			}},
+		}},
 	}
 	snapshot := saveAndPublishSnapshot(t, env, config, "products")
 	if _, ok := snapshot["id"].(string); !ok {

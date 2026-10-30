@@ -1,12 +1,6 @@
-// Package models contains the GORM persistence models of the engine together
-// with the database specific column types they rely on.
-//
-// The models are the single source of truth for the database schema: the
-// Atlas loader (cmd/atlas-loader) renders them into DDL, and the migration
-// files under migrations/ are generated from that DDL. Constraints that GORM
-// cannot express (CHECK clauses, partial and GIN indexes, deferrable
-// composite foreign keys, seed rows) live in extras.go and are appended to
-// the same DDL.
+// Package models contains persistence types and database-specific column
+// types. The clean init migration is the canonical SQL schema for new
+// installations and is also consumed by the Atlas schema loader.
 package models
 
 import (

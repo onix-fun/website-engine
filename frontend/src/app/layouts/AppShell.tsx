@@ -23,6 +23,11 @@ import {
   PanelLeftClose,
   PanelLeftOpen,
   Settings,
+  Settings2,
+  Blocks,
+  FileText,
+  GitBranch,
+  History,
   ShieldCheck,
   UserRound,
 } from "lucide-react";
@@ -69,7 +74,10 @@ const homeNav: NavItem[] = [
 ];
 
 const siteSettingsNav: NavItem[] = [
-  { to: "/site", label: "Сайт", icon: Layers, match: (p) => p.startsWith("/site") },
+  { to: "/site/router", label: "Роутер", icon: GitBranch, match: (p) => p === "/site/router" },
+  { to: "/site/features", label: "Реестр фичей", icon: Blocks, match: (p) => p === "/site/features" },
+  { to: "/site/pages", label: "Редактор страниц", icon: FileText, match: (p) => p === "/site/pages" },
+  { to: "/site/snapshots", label: "Снапшоты", icon: History, match: (p) => p === "/site/snapshots" },
 ];
 
 const administrationNav: NavItem[] = [
@@ -79,6 +87,7 @@ const administrationNav: NavItem[] = [
 
 const contentNav: NavItem[] = [
   { to: "/content", label: "Контент", icon: Layers, match: (p) => p.startsWith("/content") || /^\/features\/[^/]+/.test(p) },
+  { to: "/site-metadata", label: "Основные настройки сайта", icon: Settings2, match: (p) => p.startsWith("/site-metadata") },
   { to: "/media", label: "Файлы", icon: Image, match: (p) => p.startsWith("/media") },
   { to: "/submissions", label: "Заявки", icon: Inbox, match: (p) => p.startsWith("/submissions") },
 ];

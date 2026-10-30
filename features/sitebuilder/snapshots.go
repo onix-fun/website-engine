@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/url"
 	"sort"
 	"strings"
 	"time"
@@ -17,6 +18,7 @@ import (
 
 	"websiteengine/pkg/environment"
 	"websiteengine/pkg/platform/validate"
+	publicruntime "websiteengine/pkg/runtime"
 )
 
 var (
@@ -89,13 +91,13 @@ type PlacementRuntime struct {
 }
 
 type RuntimeComposition struct {
-	Snapshot        SnapshotRecord     `json:"snapshot"`
-	DocumentTitle   string             `json:"documentTitle,omitempty"`
-	Route           Route              `json:"route"`
-	RouteArgs       map[string]string  `json:"routeArgs,omitempty"`
-	Page            Page               `json:"page"`
-	SharedStyleURLs []string           `json:"sharedStyleUrls,omitempty"`
-	Placements      []PlacementRuntime `json:"placements"`
+	Snapshot        SnapshotRecord             `json:"snapshot"`
+	Metadata        publicruntime.HeadMetadata `json:"metadata"`
+	Route           Route                      `json:"route"`
+	RouteArgs       map[string]string          `json:"routeArgs,omitempty"`
+	Page            Page                       `json:"page"`
+	SharedStyleURLs []string                   `json:"sharedStyleUrls,omitempty"`
+	Placements      []PlacementRuntime         `json:"placements"`
 }
 
 type CollectionPage struct {
@@ -128,7 +130,7 @@ func NewSnapshotService(pool *pgxpool.Pool, builds *BuildService) *SnapshotServi
 }
 
 func (s *SnapshotService) GetDraft(ctx context.Context) (DraftState, error) {
-	if _, err := s.pool.Exec(ctx, `INSERT INTO site_draft_config (id,config,revision) VALUES (TRUE,'{"formatVersion":1,"pages":[],"routes":[]}'::jsonb,1) ON CONFLICT (id) DO NOTHING`); err != nil {
+	if _, err := s.pool.Exec(ctx, `INSERT INTO site_draft_config (id,config,revision) VALUES (TRUE,'{"formatVersion":2,"pages":[{"id":"home","name":"Главная","kind":"page","placements":[]}],"routeTree":{"id":"root","type":"index","pageId":"home","children":[]}}'::jsonb,1) ON CONFLICT (id) DO NOTHING`); err != nil {
 		return DraftState{}, err
 	}
 	var state DraftState
@@ -155,7 +157,7 @@ func (s *SnapshotService) SaveDraft(ctx context.Context, actor uuid.UUID, expect
 		return DraftState{}, err
 	}
 	defer func() { _ = tx.Rollback(context.Background()) }()
-	if _, err := tx.Exec(ctx, `INSERT INTO site_draft_config (id,config,revision,updated_by) VALUES (TRUE,'{"formatVersion":1,"pages":[],"routes":[]}'::jsonb,1,$1) ON CONFLICT (id) DO NOTHING`, actor); err != nil {
+	if _, err := tx.Exec(ctx, `INSERT INTO site_draft_config (id,config,revision,updated_by) VALUES (TRUE,'{"formatVersion":2,"pages":[{"id":"home","name":"Главная","kind":"page","placements":[]}],"routeTree":{"id":"root","type":"index","pageId":"home","children":[]}}'::jsonb,1,$1) ON CONFLICT (id) DO NOTHING`, actor); err != nil {
 		return DraftState{}, err
 	}
 	var current int64
@@ -177,11 +179,18 @@ func (s *SnapshotService) SaveDraft(ctx context.Context, actor uuid.UUID, expect
 }
 
 func (s *SnapshotService) Publish(ctx context.Context, actor uuid.UUID, name string) (SnapshotRecord, error) {
+	if _, err := s.GetMetadata(ctx); err != nil {
+		return SnapshotRecord{}, err
+	}
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return SnapshotRecord{}, err
 	}
 	defer func() { _ = tx.Rollback(context.Background()) }()
+	var metadataRevision int64
+	if err := tx.QueryRow(ctx, `SELECT revision FROM site_metadata_state WHERE id=TRUE FOR UPDATE`).Scan(&metadataRevision); err != nil {
+		return SnapshotRecord{}, err
+	}
 	var raw []byte
 	if err := tx.QueryRow(ctx, `SELECT config FROM site_draft_config WHERE id=TRUE FOR UPDATE`).Scan(&raw); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -232,6 +241,13 @@ func (s *SnapshotService) Publish(ctx context.Context, actor uuid.UUID, name str
 	err = tx.QueryRow(ctx, `SELECT id,sequence,name,digest,created_at FROM site_snapshots WHERE digest=$1`, digest).
 		Scan(&existing.ID, &existing.Sequence, &existing.Name, &existing.Digest, &existing.CreatedAt)
 	if err == nil {
+		metadataState, err := readMetadata(ctx, tx)
+		if err != nil {
+			return SnapshotRecord{}, err
+		}
+		if err := s.rebuildShellsTx(ctx, tx, environment.Dev, existing.ID, payload, metadataState.Dev, metadataState.DevRevision); err != nil {
+			return SnapshotRecord{}, err
+		}
 		if _, err := tx.Exec(ctx, `UPDATE site_environments SET active_snapshot_id=$1,revision=revision+1,updated_at=now() WHERE key='dev'`, existing.ID); err != nil {
 			return SnapshotRecord{}, err
 		}
@@ -252,6 +268,13 @@ func (s *SnapshotService) Publish(ctx context.Context, actor uuid.UUID, name str
 	record.Digest = digest
 	err = tx.QueryRow(ctx, `INSERT INTO site_snapshots (id,name,digest,payload,created_by) VALUES ($1,$2,$3,$4::jsonb,$5) RETURNING sequence,created_at`, record.ID, name, digest, string(payloadJSON), actor).Scan(&record.Sequence, &record.CreatedAt)
 	if err != nil {
+		return SnapshotRecord{}, err
+	}
+	metadataState, err := readMetadata(ctx, tx)
+	if err != nil {
+		return SnapshotRecord{}, err
+	}
+	if err := s.rebuildShellsTx(ctx, tx, environment.Dev, record.ID, payload, metadataState.Dev, metadataState.DevRevision); err != nil {
 		return SnapshotRecord{}, err
 	}
 	tag, err := tx.Exec(ctx, `UPDATE site_environments SET active_snapshot_id=$1,revision=revision+1,updated_at=now() WHERE key='dev'`, record.ID)
@@ -302,11 +325,18 @@ func (s *SnapshotService) setEnvironment(ctx context.Context, actor, snapshotID 
 	if env != environment.Dev && env != environment.Prod {
 		return SnapshotRecord{}, fmt.Errorf("%w: unsupported environment", ErrInvalid)
 	}
+	if _, err := s.GetMetadata(ctx); err != nil {
+		return SnapshotRecord{}, err
+	}
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return SnapshotRecord{}, err
 	}
 	defer func() { _ = tx.Rollback(context.Background()) }()
+	var metadataRevision int64
+	if err := tx.QueryRow(ctx, `SELECT revision FROM site_metadata_state WHERE id=TRUE FOR UPDATE`).Scan(&metadataRevision); err != nil {
+		return SnapshotRecord{}, err
+	}
 	var record SnapshotRecord
 	if err := tx.QueryRow(ctx, `SELECT id,sequence,name,digest,created_at FROM site_snapshots WHERE id=$1`, snapshotID).Scan(&record.ID, &record.Sequence, &record.Name, &record.Digest, &record.CreatedAt); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -322,6 +352,25 @@ func (s *SnapshotService) setEnvironment(ctx context.Context, actor, snapshotID 
 		if active == nil || *active != snapshotID {
 			return SnapshotRecord{}, fmt.Errorf("%w: only the active dev snapshot can be promoted", ErrConflict)
 		}
+	}
+	var payloadRaw []byte
+	if err := tx.QueryRow(ctx, `SELECT payload FROM site_snapshots WHERE id=$1`, snapshotID).Scan(&payloadRaw); err != nil {
+		return SnapshotRecord{}, err
+	}
+	var payload SnapshotPayload
+	if err := json.Unmarshal(payloadRaw, &payload); err != nil {
+		return SnapshotRecord{}, err
+	}
+	metadataState, err := readMetadata(ctx, tx)
+	if err != nil {
+		return SnapshotRecord{}, err
+	}
+	metadata, revision := metadataState.Dev, metadataState.DevRevision
+	if env == environment.Prod {
+		metadata, revision = metadataState.Prod, metadataState.ProdRevision
+	}
+	if err := s.rebuildShellsTx(ctx, tx, env, snapshotID, payload, metadata, revision); err != nil {
+		return SnapshotRecord{}, err
 	}
 	tag, err := tx.Exec(ctx, `UPDATE site_environments SET active_snapshot_id=$1,revision=revision+1,updated_at=now() WHERE key=$2`, snapshotID, env.String())
 	if err != nil {
@@ -356,12 +405,12 @@ func (s *SnapshotService) Active(ctx context.Context, env environment.Environmen
 	return record, payload, nil
 }
 
-func (s *SnapshotService) Runtime(ctx context.Context, env environment.Environment, requestPath string) (RuntimeComposition, error) {
+func (s *SnapshotService) Runtime(ctx context.Context, env environment.Environment, requestPath string, query url.Values) (RuntimeComposition, error) {
 	record, payload, err := s.Active(ctx, env)
 	if err != nil {
 		return RuntimeComposition{}, err
 	}
-	routes, err := CompileRoutes(payload.Config.Routes)
+	routes, err := CompileRouteTree(payload.Config.RouteTree)
 	if err != nil {
 		return RuntimeComposition{}, err
 	}
@@ -379,7 +428,15 @@ func (s *SnapshotService) Runtime(ctx context.Context, env environment.Environme
 			break
 		}
 	}
-	result := RuntimeComposition{Snapshot: record, DocumentTitle: payload.Config.DocumentTitle, Route: route, RouteArgs: args, Page: page, Placements: []PlacementRuntime{}}
+	metadataState, err := s.GetMetadata(ctx)
+	if err != nil {
+		return RuntimeComposition{}, err
+	}
+	metadata := metadataState.Dev
+	if env == environment.Prod {
+		metadata = metadataState.Prod
+	}
+	result := RuntimeComposition{Snapshot: record, Metadata: metadata.ForPage(page.ID), Route: route, RouteArgs: args, Page: page, Placements: []PlacementRuntime{}}
 	sharedStyleSeen := make(map[string]bool)
 	registry := payloadBuildRegistry(payload.Builds)
 	for _, placement := range page.Placements {
@@ -387,7 +444,7 @@ func (s *SnapshotService) Runtime(ctx context.Context, env environment.Environme
 		if !ok {
 			return RuntimeComposition{}, fmt.Errorf("snapshot references missing build %s@%s", placement.Build.FeatureKey, placement.Build.Version)
 		}
-		arguments, err := ResolveArguments(info.Manifest.Arguments, placement.Arguments, args)
+		arguments, err := ResolveArguments(info.Manifest.Arguments, placement.Arguments, args, query)
 		if err != nil {
 			return RuntimeComposition{}, err
 		}

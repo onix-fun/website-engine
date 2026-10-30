@@ -11,10 +11,22 @@ import (
 
 // SiteConfig is the editable page/route composition authored in the admin UI.
 type SiteConfig struct {
-	FormatVersion int     `json:"formatVersion"`
-	DocumentTitle string  `json:"documentTitle,omitempty"`
-	Pages         []Page  `json:"pages"`
-	Routes        []Route `json:"routes"`
+	FormatVersion int           `json:"formatVersion"`
+	Pages         []Page        `json:"pages"`
+	RouteTree     RouteTreeNode `json:"routeTree"`
+}
+
+// RouteTreeNode is one URL segment in the ordered route tree. A node may
+// resolve a page and still have children, so /section and /section/item can
+// share the same prefix.
+type RouteTreeNode struct {
+	ID       string          `json:"id"`
+	Type     string          `json:"type"`
+	Value    string          `json:"value,omitempty"`
+	Name     string          `json:"name,omitempty"`
+	Pattern  string          `json:"pattern,omitempty"`
+	PageID   string          `json:"pageId,omitempty"`
+	Children []RouteTreeNode `json:"children,omitempty"`
 }
 
 type Page struct {
@@ -90,8 +102,8 @@ func ParseSiteConfig(raw []byte) (SiteConfig, error) {
 }
 
 func (cfg SiteConfig) Validate(builds BuildLookup) error {
-	if cfg.FormatVersion != 1 {
-		return errors.New("formatVersion must be 1")
+	if cfg.FormatVersion != 2 {
+		return errors.New("formatVersion must be 2")
 	}
 	if len(cfg.Pages) == 0 {
 		return errors.New("at least one page is required")
@@ -131,22 +143,24 @@ func (cfg SiteConfig) Validate(builds BuildLookup) error {
 			}
 		}
 	}
-	routes, err := CompileRoutes(cfg.Routes)
+	routes, err := CompileRouteTree(cfg.RouteTree)
 	if err != nil {
 		return err
 	}
 	routeByID := make(map[string]CompiledRoute, len(routes))
-	pageRouteCaptures := make(map[string]map[string]bool)
+	pageRouteCaptures := make(map[string][]string)
 	for _, route := range routes {
 		if _, ok := pages[route.PageID]; !ok {
 			return fmt.Errorf("route %q references missing page %q", route.ID, route.PageID)
 		}
 		routeByID[route.ID] = route
-		if pageRouteCaptures[route.PageID] == nil {
-			pageRouteCaptures[route.PageID] = make(map[string]bool)
-		}
-		for _, name := range route.CaptureNames() {
-			pageRouteCaptures[route.PageID][name] = true
+		captures := route.CaptureNames()
+		if previous, ok := pageRouteCaptures[route.PageID]; ok {
+			if !sameStrings(previous, captures) {
+				return fmt.Errorf("all routes for page %q must expose the same path parameters", route.PageID)
+			}
+		} else {
+			pageRouteCaptures[route.PageID] = captures
 		}
 	}
 	if builds == nil {
@@ -176,10 +190,14 @@ func (cfg SiteConfig) Validate(builds BuildLookup) error {
 			if !allowedSlots[placement.Slot] || !contains(info.Manifest.Slots, placement.Slot) {
 				return fmt.Errorf("feature %q does not support slot %q", info.Manifest.Key, placement.Slot)
 			}
-			availableCaptures := pageRouteCaptures[page.ID]
+			availableCaptureNames := pageRouteCaptures[page.ID]
+			availableCaptures := make(map[string]bool, len(availableCaptureNames))
+			for _, capture := range availableCaptureNames {
+				availableCaptures[capture] = true
+			}
 			for name, binding := range placement.Arguments {
-				if binding.Source == "route" && !availableCaptures[binding.RouteArg] {
-					return fmt.Errorf("placement %q maps %q to unavailable route capture %q", placement.ID, name, binding.RouteArg)
+				if binding.Source == "path" && !availableCaptures[binding.PathArg] {
+					return fmt.Errorf("placement %q maps %q to unavailable path parameter %q", placement.ID, name, binding.PathArg)
 				}
 			}
 			placeholderRouteArgs := make(map[string]string, len(availableCaptures))
@@ -187,17 +205,34 @@ func (cfg SiteConfig) Validate(builds BuildLookup) error {
 				placeholderRouteArgs[capture] = "x"
 			}
 			for name, binding := range placement.Arguments {
-				if binding.Source == "route" {
+				if binding.Source == "path" {
 					propertyType := schemaPropertyType(info.Manifest.Arguments, name)
 					switch propertyType {
 					case "integer", "number":
-						placeholderRouteArgs[binding.RouteArg] = "0"
+						placeholderRouteArgs[binding.PathArg] = "0"
 					case "boolean":
-						placeholderRouteArgs[binding.RouteArg] = "false"
+						placeholderRouteArgs[binding.PathArg] = "false"
+					default:
+						placeholderRouteArgs[binding.PathArg] = "x"
 					}
 				}
 			}
-			if _, err := ResolveArguments(info.Manifest.Arguments, placement.Arguments, placeholderRouteArgs); err != nil {
+			placeholderQuery := make(map[string][]string)
+			for name, binding := range placement.Arguments {
+				if binding.Source != "query" {
+					continue
+				}
+				propertyType := schemaPropertyType(info.Manifest.Arguments, name)
+				value := "x"
+				if propertyType == "integer" || propertyType == "number" {
+					value = "0"
+				}
+				if propertyType == "boolean" {
+					value = "false"
+				}
+				placeholderQuery[binding.QueryKey] = []string{value}
+			}
+			if _, err := ResolveArguments(info.Manifest.Arguments, placement.Arguments, placeholderRouteArgs, placeholderQuery); err != nil {
 				return fmt.Errorf("placement %q arguments: %w", placement.ID, err)
 			}
 			if placement.CollectionSource != nil {
@@ -216,11 +251,11 @@ func (cfg SiteConfig) Validate(builds BuildLookup) error {
 					return fmt.Errorf("placement %q collectionSource argument %q is not declared by the detail feature", placement.ID, placement.CollectionSource.Argument)
 				}
 				binding, ok := placement.Arguments[placement.CollectionSource.Argument]
-				if !ok || binding.Source != "route" {
+				if !ok || binding.Source != "path" {
 					return fmt.Errorf("placement %q must bind collection lookup argument %q from a named route capture", placement.ID, placement.CollectionSource.Argument)
 				}
-				if !availableCaptures[binding.RouteArg] {
-					return fmt.Errorf("placement %q collection lookup route capture %q is unavailable", placement.ID, binding.RouteArg)
+				if !availableCaptures[binding.PathArg] {
+					return fmt.Errorf("placement %q collection lookup path parameter %q is unavailable", placement.ID, binding.PathArg)
 				}
 			}
 			if placement.DetailLink != nil {
@@ -247,7 +282,7 @@ func (cfg SiteConfig) Validate(builds BuildLookup) error {
 					}
 					binding := detailPlacement.Arguments[detailPlacement.CollectionSource.Argument]
 					for _, candidateRoute := range routes {
-						if candidateRoute.PageID == detailPage.ID && binding.RouteArg != "" && contains(candidateRoute.CaptureNames(), binding.RouteArg) {
+						if candidateRoute.PageID == detailPage.ID && binding.PathArg != "" && contains(candidateRoute.CaptureNames(), binding.PathArg) {
 							compatible = true
 						}
 					}

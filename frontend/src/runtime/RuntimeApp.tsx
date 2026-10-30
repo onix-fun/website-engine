@@ -3,7 +3,6 @@ import {
   useCallback,
   createElement,
   useEffect,
-  useMemo,
   useState,
   type ComponentType,
 } from "react";
@@ -24,8 +23,8 @@ type RuntimePlacement = {
 
 type Composition = {
   snapshot: { id: string; sequence: number; name: string };
-  documentTitle?: string;
   page: { id: string; name: string; kind: string };
+  metadata: { title: string; description: string; faviconUrl: string; ogTitle: string; ogDescription: string; ogImageUrl: string };
   sharedStyleUrls?: string[];
   placements: RuntimePlacement[];
 };
@@ -102,6 +101,30 @@ function ensureStyles(urls: string[]) {
   }
 }
 
+function setHeadMetadata(metadata: Composition["metadata"]) {
+  document.title = metadata.title || "Website";
+  const setMeta = (selector: string, attribute: "name" | "property", key: string, content: string) => {
+    let element = document.head.querySelector<HTMLMetaElement>(selector);
+    if (!content) { element?.remove(); return; }
+    if (!element) {
+      element = document.createElement("meta");
+      element.setAttribute(attribute, key);
+      document.head.append(element);
+    }
+    element.content = content;
+  };
+  setMeta('meta[name="description"]', "name", "description", metadata.description);
+  setMeta('meta[property="og:title"]', "property", "og:title", metadata.ogTitle);
+  setMeta('meta[property="og:description"]', "property", "og:description", metadata.ogDescription);
+  setMeta('meta[property="og:image"]', "property", "og:image", metadata.ogImageUrl);
+  let icon = document.head.querySelector<HTMLLinkElement>('link[rel="icon"]');
+  if (!metadata.faviconUrl) icon?.remove();
+  else {
+    if (!icon) { icon = document.createElement("link"); icon.rel = "icon"; document.head.append(icon); }
+    icon.href = metadata.faviconUrl;
+  }
+}
+
 function FeatureMount({ placement }: { placement: RuntimePlacement }) {
   const [Feature, setFeature] = useState<ComponentType<FeatureProps> | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -143,14 +166,13 @@ function StatePage({ title, detail, retry }: { title: string; detail: string; re
 }
 
 export function RuntimeApp() {
-  const [path, setPath] = useState(() => window.location.pathname);
+  const [location, setLocation] = useState(() => ({ path: window.location.pathname, search: window.location.search.slice(1) }));
+  const { path, search } = location;
   const [composition, setComposition] = useState<Composition | null>(null);
   const [state, setState] = useState<"loading" | "ready" | "missing" | "error">("loading");
   const [errorMessage, setErrorMessage] = useState("Не удалось загрузить страницу.");
-  const pathKey = useMemo(() => `${path}${window.location.search}`, [path]);
-
   useEffect(() => {
-    const update = () => setPath(window.location.pathname);
+    const update = () => setLocation({ path: window.location.pathname, search: window.location.search.slice(1) });
     window.addEventListener("popstate", update);
     return () => window.removeEventListener("popstate", update);
   }, []);
@@ -159,7 +181,8 @@ export function RuntimeApp() {
     setState("loading");
     setErrorMessage("Не удалось загрузить страницу.");
     try {
-      const response = await fetch(`/api/v2/runtime?path=${encodeURIComponent(pathKey.split("?")[0] || "/")}`, {
+      const params = new URLSearchParams({ path: path || "/", search });
+      const response = await fetch(`/api/v2/runtime?${params.toString()}`, {
         headers: { Accept: "application/json" },
       });
       if (response.status === 404) { setState("missing"); return; }
@@ -171,14 +194,14 @@ export function RuntimeApp() {
       }
       const result = await response.json() as Composition;
       ensureStyles(result.sharedStyleUrls ?? []);
+      setHeadMetadata(result.metadata);
       setComposition(result);
-      if (result.documentTitle) document.title = result.documentTitle;
       setState("ready");
     } catch (reason) {
       setErrorMessage(reason instanceof Error ? reason.message : "Проверьте соединение и попробуйте снова.");
       setState("error");
     }
-  }, [pathKey]);
+  }, [path, search]);
 
   useEffect(() => { void load(); }, [load]);
 

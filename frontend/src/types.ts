@@ -366,9 +366,10 @@ export interface FeatureBuild {
 }
 
 export interface FeatureArgumentBinding {
-  source: "literal" | "route";
+  source: "literal" | "path" | "query";
   value?: JsonValue;
-  routeArg?: string;
+  pathArg?: string;
+  queryKey?: string;
 }
 
 export interface SitePlacement {
@@ -387,17 +388,20 @@ export interface SitePage {
   placements: SitePlacement[];
 }
 
-export interface SiteRoute {
+export interface RouteTreeNode {
   id: string;
-  pattern: string;
-  pageId: string;
+  type: "index" | "static" | "param" | "regex" | "catchAll";
+  value?: string;
+  name?: string;
+  pattern?: string;
+  pageId?: string;
+  children?: RouteTreeNode[];
 }
 
 export interface SiteConfig {
-  formatVersion: 1;
-  documentTitle?: string;
+  formatVersion: 2;
   pages: SitePage[];
-  routes: SiteRoute[];
+  routeTree: RouteTreeNode;
 }
 
 export interface SiteDraftState {
@@ -417,6 +421,42 @@ export interface SiteSnapshot {
 export interface SiteSnapshotList {
   items: SiteSnapshot[];
   active: Record<Environment, string>;
+}
+
+export interface SiteMetadataOverride {
+  siteName?: string | null;
+  faviconMediaId?: string | null;
+  description?: string | null;
+  ogTitle?: string | null;
+  ogDescription?: string | null;
+  ogImageMediaId?: string | null;
+}
+
+export interface SiteMetadata {
+  formatVersion: 1;
+  siteName: string;
+  faviconMediaId?: string;
+  description?: string;
+  ogTitle?: string;
+  ogDescription?: string;
+  ogImageMediaId?: string;
+  pages?: Record<string, SiteMetadataOverride>;
+}
+
+export interface SiteMetadataPage {
+  id: string;
+  name: string;
+}
+
+export interface SiteMetadataState {
+  revision: number;
+  devRevision: number;
+  prodRevision: number;
+  pages: SiteMetadataPage[];
+  draft: SiteMetadata;
+  dev: SiteMetadata;
+  prod: SiteMetadata;
+  updatedAt: string;
 }
 
 export interface EnvironmentPatch {

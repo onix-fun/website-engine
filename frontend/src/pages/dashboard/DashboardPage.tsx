@@ -131,7 +131,7 @@ export default function DashboardPage() {
     ["Файлы", "Медиатека", "/media"],
     ...(canManageSite
       ? [
-          ["Сайт", "Страницы и снапшоты", "/site"],
+          ["Сайт", "Роутер, страницы и снапшоты", "/site/pages"],
           ["Доступы", "Пользователи и роли", "/access/tokens"],
         ]
       : []),
@@ -152,7 +152,7 @@ export default function DashboardPage() {
             </Button>
             {canManageSite && (
               <Button asChild>
-                <Link to="/site">
+                <Link to="/site/pages">
                   <Plus />
                   Сборки и страницы
                 </Link>
@@ -411,10 +411,10 @@ export default function DashboardPage() {
               <h2 className="text-sm font-semibold">Быстрый старт</h2>
               <ol className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
                 {[
-                  ["1", "Загрузить фичи", "Импортировать ZIP-сборки с манифестами", "/site"],
-                  ["2", "Собрать страницы", "Настроить маршруты и размещения", "/site"],
+                  ["1", "Загрузить фичи", "Импортировать ZIP-сборки с манифестами", "/site/features"],
+                  ["2", "Собрать страницы", "Настроить маршруты и размещения", "/site/pages"],
                   ["3", "Добавить контент", "Заполнить поля из манифестов", "/content"],
-                  ["4", "Опубликовать снапшот", "Проверить dev и продвинуть в prod", "/site"],
+                  ["4", "Опубликовать снапшот", "Проверить dev и продвинуть в prod", "/site/snapshots"],
                 ].map(([step, title, text, to]) => (
                   <li key={step}>
                     <Link

@@ -33,7 +33,7 @@ export function SiteStatusCard() {
             </div>
           </div>
           <Link
-            to="/site"
+            to="/site/snapshots"
             className="flex items-center gap-1 text-xs text-muted-foreground transition-colors hover:text-foreground"
           >
             Управление сайтом

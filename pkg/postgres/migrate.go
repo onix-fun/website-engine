@@ -103,6 +103,21 @@ func SeedDefaults(ctx context.Context, pool *pgxpool.Pool) error {
 		ON CONFLICT (key) DO NOTHING`); err != nil {
 		return fmt.Errorf("seed site environments: %w", err)
 	}
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO site_draft_config (id, config, revision)
+		VALUES (TRUE, '{"formatVersion":2,"pages":[{"id":"home","name":"Главная","kind":"page","placements":[]}],"routeTree":{"id":"root","type":"index","pageId":"home","children":[]}}'::jsonb, 1)
+		ON CONFLICT (id) DO NOTHING`); err != nil {
+		return fmt.Errorf("seed default site page: %w", err)
+	}
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO site_metadata_state (id, draft, dev, prod)
+		VALUES (TRUE,
+			'{"formatVersion":1,"siteName":"Website","pages":{}}'::jsonb,
+			'{"formatVersion":1,"siteName":"Website","pages":{}}'::jsonb,
+			'{"formatVersion":1,"siteName":"Website","pages":{}}'::jsonb)
+		ON CONFLICT (id) DO NOTHING`); err != nil {
+		return fmt.Errorf("seed site metadata: %w", err)
+	}
 	return nil
 }
 
