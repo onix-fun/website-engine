@@ -34,7 +34,7 @@ export default function ContentHomePage() {
           <Layers className="mx-auto h-8 w-8 text-muted-foreground" aria-hidden="true" />
           <h2 className="mt-3 text-base font-semibold">Пока нет доступного контента</h2>
           <p className="mx-auto mt-1 max-w-lg text-sm text-muted-foreground">
-            Здесь появятся фичи, включённые в активный dev-снапшот и имеющие схему контента.
+            Чтобы начать редактирование, добавьте фичи на страницу и опубликуйте dev-снапшот. После этого здесь появятся поля для контента.
           </p>
         </div>
       ) : (

@@ -633,6 +633,9 @@ func (s *SnapshotService) SettingsSchema(ctx context.Context, env environment.En
 // ContentCatalog lists only features pinned by the active dev site snapshot.
 func (s *SnapshotService) ContentCatalog(ctx context.Context) ([]ContentFeature, error) {
 	_, payload, err := s.Active(ctx, environment.Dev)
+	if errors.Is(err, ErrSnapshotUnavailable) {
+		return []ContentFeature{}, nil
+	}
 	if err != nil {
 		return nil, err
 	}
