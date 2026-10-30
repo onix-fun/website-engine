@@ -52,6 +52,7 @@ type Dependencies struct {
 	TrustProxy        bool
 	PublicCORSOrigins []string
 	PublicCORSByEnv   map[environment.Environment][]string
+	S3PublicBaseURL   string
 }
 
 func NewRouter(d Deps) http.Handler {
@@ -318,7 +319,7 @@ func NewPublicRouter(d Deps, env environment.Environment) http.Handler {
 	// The engine always serves its embedded runtime shell. Published snapshots
 	// supply the composition and feature assets; the old full-site release
 	// handler is intentionally not part of this runtime path.
-	mux.Handle("/", publicruntime.Handler())
+	mux.Handle("/", publicruntime.Handler(d.S3PublicBaseURL))
 
 	handler := middleware.RequestID(mux)
 	handler = middleware.SecurityHeaders(handler)

@@ -195,6 +195,7 @@ func run(log *slog.Logger) error {
 		CorsResolver:      releaseService.Cors(),
 		FormRateLimit:     cfg.FormRateLimit, FormRateWindow: cfg.FormRateWindow,
 		TrustProxy: cfg.TrustProxyHeaders, PublicCORSOrigins: cfg.PublicCORSOrigins, PublicCORSByEnv: cfg.PublicCORSByEnv,
+		S3PublicBaseURL: cfg.S3.PublicBaseURL,
 	}
 
 	servers := []*http.Server{

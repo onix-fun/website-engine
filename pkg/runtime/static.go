@@ -7,6 +7,7 @@ import (
 	"embed"
 	"io/fs"
 	"net/http"
+	"net/url"
 	"path"
 	"strings"
 )
@@ -15,7 +16,7 @@ import (
 var embedded embed.FS
 
 // Handler serves the public runtime SPA and its content-hashed assets.
-func Handler() http.Handler {
+func Handler(mediaPublicBaseURL string) http.Handler {
 	sub, err := fs.Sub(embedded, "dist")
 	if err != nil {
 		panic(err)
@@ -29,7 +30,7 @@ func Handler() http.Handler {
 		}
 		clean := path.Clean("/" + r.URL.Path)
 		if clean == "/" || clean == "." {
-			serveIndex(w, r, sub)
+			serveIndex(w, r, sub, mediaPublicBaseURL)
 			return
 		}
 		name := strings.TrimPrefix(clean, "/")
@@ -46,11 +47,11 @@ func Handler() http.Handler {
 			http.NotFound(w, r)
 			return
 		}
-		serveIndex(w, r, sub)
+		serveIndex(w, r, sub, mediaPublicBaseURL)
 	})
 }
 
-func serveIndex(w http.ResponseWriter, r *http.Request, filesystem fs.FS) {
+func serveIndex(w http.ResponseWriter, r *http.Request, filesystem fs.FS, mediaPublicBaseURL string) {
 	data, err := fs.ReadFile(filesystem, "index.html")
 	if err != nil {
 		http.Error(w, "public runtime is not built", http.StatusServiceUnavailable)
@@ -60,7 +61,7 @@ func serveIndex(w http.ResponseWriter, r *http.Request, filesystem fs.FS) {
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("Content-Security-Policy",
 		"default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; "+
-			"img-src 'self' data: blob: https:; media-src 'self' blob: https:; "+
+			"img-src 'self' data: blob: https: "+mediaOrigin(mediaPublicBaseURL)+"; media-src 'self' blob: https: "+mediaOrigin(mediaPublicBaseURL)+"; "+
 			"connect-src 'self'; font-src 'self' data:; frame-ancestors 'none'; "+
 			"base-uri 'self'; form-action 'self'")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
@@ -68,4 +69,12 @@ func serveIndex(w http.ResponseWriter, r *http.Request, filesystem fs.FS) {
 	if r.Method != http.MethodHead {
 		_, _ = w.Write(data)
 	}
+}
+
+func mediaOrigin(raw string) string {
+	parsed, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" {
+		return ""
+	}
+	return parsed.Scheme + "://" + parsed.Host
 }
