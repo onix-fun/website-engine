@@ -70,6 +70,9 @@ const homeNav: NavItem[] = [
 
 const siteSettingsNav: NavItem[] = [
   { to: "/site", label: "Сайт", icon: Layers, match: (p) => p.startsWith("/site") },
+];
+
+const administrationNav: NavItem[] = [
   { to: "/access/tokens", label: "Доступы", icon: ShieldCheck, match: (p) => p.startsWith("/access") },
   { to: "/settings", label: "Настройки", icon: Settings, match: (p) => p.startsWith("/settings") },
 ];
@@ -257,6 +260,9 @@ function SidebarContent({
             <div className="my-4 border-t border-sidebar-border" />
             {!collapsed && <p className="mb-2 px-2 text-2xs font-medium uppercase tracking-wider text-sidebar-muted">Настройки сайта</p>}
             <NavList collapsed={collapsed} items={siteSettingsNav} onNavigate={onNavigate} />
+            <div className="my-4 border-t border-sidebar-border" />
+            {!collapsed && <p className="mb-2 px-2 text-2xs font-medium uppercase tracking-wider text-sidebar-muted">Настройки и доступы</p>}
+            <NavList collapsed={collapsed} items={administrationNav} onNavigate={onNavigate} />
           </>
         )}
         <div className="my-4 border-t border-sidebar-border" />
