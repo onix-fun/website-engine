@@ -23,6 +23,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { api, ApiError } from "@/api";
+import { useAuth } from "@/app/auth";
 import type {
   EntryDetail,
   EntryVersion,
@@ -113,7 +114,7 @@ function collectMediaIds(
     if (Array.isArray(value)) value.forEach(addMedia);
   };
   const walk = (field: SchemaFieldNode, value: JsonValue | undefined) => {
-    if (field.type === "media") {
+    if (field.type === "media" || field.type === "file") {
       addMedia(value);
       return;
     }
@@ -124,7 +125,7 @@ function collectMediaIds(
     }
     if (field.type === "array") {
       if (!Array.isArray(value)) return;
-      if (field.itemType === "media") addMedia(value);
+      if (field.itemType === "media" || field.itemType === "file") addMedia(value);
       if (field.itemType === "object") {
         value.forEach((item) => {
           if (!isRecord(item)) return;
@@ -190,6 +191,8 @@ function SaveStateBadge({
 
 export default function ContentEditorPage() {
   const { feature } = useFeatureContext();
+  const { principal } = useAuth();
+  const canPromote = principal?.role === "admin" || principal?.role === "moderator";
   const { entryId } = useParams<{ entryId: string }>();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
@@ -202,20 +205,17 @@ export default function ContentEditorPage() {
   );
 
   const schemaQuery = useQuery({
-    queryKey: queryKeys.features.draft(feature.id),
-    queryFn: ({ signal }) => api.features.draft(feature.id, signal),
+    queryKey: queryKeys.content.catalog,
+    queryFn: ({ signal }) => api.siteBuilder.contentFeatures(signal),
   });
+  const activeContentFeature = schemaQuery.data?.items.find((item) => item.id === feature.id);
   const entryQuery = useQuery({
     queryKey: queryKeys.entries.detail(entryId ?? ""),
     queryFn: ({ signal }) => api.entries.get(entryId!, signal),
     enabled: Boolean(entryId),
   });
 
-  const schema =
-    schemaQuery.data?.draft?.schema ??
-    schemaQuery.data?.dev?.schema ??
-    schemaQuery.data?.prod?.schema ??
-    null;
+  const schema = activeContentFeature?.schema ?? null;
   const fields = useMemo(() => parsedSchema(schema).fields, [schema]);
   const blocksKey = useMemo(() => blocksKeyFromFields(fields), [fields]);
 
@@ -240,6 +240,7 @@ export default function ContentEditorPage() {
   const [blockWarnings, setBlockWarnings] = useState<string[]>([]);
   const importInput = useRef<HTMLInputElement>(null);
   const [importing, setImporting] = useState(false);
+  const [promotionError, setPromotionError] = useState<ApiError | null>(null);
 
   const data = useMemo(
     () =>
@@ -443,12 +444,19 @@ export default function ContentEditorPage() {
       return api.entries.promote(currentId, autosave.getRevision());
     },
     onSuccess: (entry) => {
+      setPromotionError(null);
       queryClient.setQueryData(queryKeys.entries.detail(entry.id), entry);
       void queryClient.invalidateQueries({ queryKey: queryKeys.entries.list(feature.id) });
       void queryClient.invalidateQueries({ queryKey: queryKeys.overview });
       toast.success(entry.prod ? `Запись в prod: v${entry.prod.version}` : "Запись продвинута в prod");
     },
-    onError: (error) => toast.error(errorMessage(error)),
+    onError: (error) => {
+      if (error instanceof ApiError && error.details.length > 0) {
+        setPromotionError(error);
+        return;
+      }
+      toast.error(errorMessage(error));
+    },
   });
 
   const handlePublish = async () => {
@@ -686,6 +694,16 @@ export default function ContentEditorPage() {
     );
   }
 
+  if (!activeContentFeature) {
+    return (
+      <EmptyState
+        title="Фича не входит в активный dev-снапшот"
+        description="Её содержимое можно редактировать после добавления в dev-снапшот."
+        action={<Button variant="outline" asChild><Link to="/content">К контенту</Link></Button>}
+      />
+    );
+  }
+
   if (entryId && entryQuery.error) {
     const notFound =
       entryQuery.error instanceof ApiError && entryQuery.error.status === 404;
@@ -816,22 +834,24 @@ export default function ContentEditorPage() {
                 ? `Опубликовать (${blockingIssues.length})`
                 : "Опубликовать"}
             </Button>
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={() => promoteMutation.mutate()}
-              loading={promoteMutation.isPending}
-              disabled={archived || !entry?.dev || pendingDraft || dirty}
-              title={
-                !entry?.dev
-                  ? "Сначала опубликуйте запись в dev"
-                  : dirty || pendingDraft
-                    ? "Сначала опубликуйте черновик в dev — иначе в prod уйдёт предыдущая версия"
-                    : "Продвинуть текущую dev-версию в prod"
-              }
-            >
-              В prod
-            </Button>
+            {canPromote && (
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => promoteMutation.mutate()}
+                loading={promoteMutation.isPending}
+                disabled={archived || !entry?.dev || pendingDraft || dirty}
+                title={
+                  !entry?.dev
+                    ? "Сначала опубликуйте запись в dev"
+                    : dirty || pendingDraft
+                      ? "Сначала опубликуйте черновик в dev — иначе в prod уйдёт предыдущая версия"
+                      : "Продвинуть текущую dev-версию в prod"
+                }
+              >
+                В prod
+              </Button>
+            )}
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <Button
@@ -882,6 +902,30 @@ export default function ContentEditorPage() {
             </DropdownMenu>
           </div>
         </div>
+
+        {feature.type === "form" && (
+          <div className="border-b border-border p-3 sm:p-4">
+            <InlineAlert tone="info" title="Редактируются тексты формы">
+              Схема отправки задаётся сборкой. Заявки посетителей находятся в разделе «Заявки».
+            </InlineAlert>
+          </div>
+        )}
+
+        {promotionError && (
+          <div className="border-b border-border p-3 sm:p-4">
+            <InlineAlert tone="danger" title="Контент не подходит для активной prod-схемы">
+              <p>{promotionError.message}</p>
+              <ul className="mt-2 list-disc space-y-1 pl-5">
+                {promotionError.details.map((detail, index) => (
+                  <li key={`${detail.path ?? "field"}-${index}`}>
+                    {detail.path && <code className="font-medium">{detail.path}: </code>}
+                    {detail.message}
+                  </li>
+                ))}
+              </ul>
+            </InlineAlert>
+          </div>
+        )}
 
         {autosave.conflict && (
           <div className="border-b border-border p-3 sm:p-4">
@@ -1135,7 +1179,7 @@ export default function ContentEditorPage() {
                       >
                         Как черновик
                       </Button>
-                      {version.status === "published" && (
+                      {canPromote && version.status === "published" && (
                         <Button
                           size="sm"
                           variant="ghost"

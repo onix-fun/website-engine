@@ -34,10 +34,19 @@ func (e *ConflictError) Unwrap() error { return ErrConflict }
 type Service struct {
 	repo        *Repository
 	featureRepo *features.Repository
+	schemas     SnapshotSchemaProvider
+}
+
+type SnapshotSchemaProvider interface {
+	FormSchema(context.Context, environment.Environment, string) (uuid.UUID, json.RawMessage, error)
 }
 
 func NewService(repo *Repository, featureRepo *features.Repository) *Service {
 	return &Service{repo: repo, featureRepo: featureRepo}
+}
+
+func (s *Service) SetSnapshotSchemaProvider(provider SnapshotSchemaProvider) {
+	s.schemas = provider
 }
 
 // Submit validates and stores a public form submission atomically against the
@@ -46,22 +55,48 @@ func (s *Service) Submit(ctx context.Context, env environment.Environment, key s
 	if err := validateObject(data); err != nil {
 		return Submission{}, err
 	}
+	var form FormSchema
+	if s.schemas != nil {
+		schemaID, schema, err := s.schemas.FormSchema(ctx, env, key)
+		if err != nil {
+			return Submission{}, err
+		}
+		feature, err := s.featureRepo.GetByKey(ctx, key)
+		if err != nil {
+			return Submission{}, err
+		}
+		if feature.Type != "form" {
+			return Submission{}, &ValidationError{Message: "Feature не является формой"}
+		}
+		form = FormSchema{FeatureID: feature.ID, FeatureKey: feature.Key, VersionID: schemaID, Schema: schema, Environment: env}
+	}
+	if s.schemas != nil {
+		fieldErrors, err := validate.Validate(form.Schema, data)
+		if err != nil {
+			return Submission{}, fmt.Errorf("validate snapshot form data: %w", err)
+		}
+		if len(fieldErrors) > 0 {
+			return Submission{}, &ValidationError{Message: "Данные не соответствуют форме", Details: fieldErrors}
+		}
+	}
 	tx, err := s.repo.Begin(ctx)
 	if err != nil {
 		return Submission{}, err
 	}
 	defer func() { _ = tx.Rollback(context.Background()) }()
 
-	form, err := s.repo.LookupFormByKey(ctx, tx, env, key, true)
-	if err != nil {
-		return Submission{}, err
-	}
-	fieldErrors, err := validate.Validate(form.Schema, data)
-	if err != nil {
-		return Submission{}, fmt.Errorf("validate form data: %w", err)
-	}
-	if len(fieldErrors) > 0 {
-		return Submission{}, &ValidationError{Message: "Данные не соответствуют форме", Details: fieldErrors}
+	if s.schemas == nil {
+		form, err = s.repo.LookupFormByKey(ctx, tx, env, key, true)
+		if err != nil {
+			return Submission{}, err
+		}
+		fieldErrors, err := validate.Validate(form.Schema, data)
+		if err != nil {
+			return Submission{}, fmt.Errorf("validate form data: %w", err)
+		}
+		if len(fieldErrors) > 0 {
+			return Submission{}, &ValidationError{Message: "Данные не соответствуют форме", Details: fieldErrors}
+		}
 	}
 	submission := Submission{
 		ID: uuid.New(), FeatureID: form.FeatureID, FeatureKey: form.FeatureKey,
@@ -215,6 +250,14 @@ func (s *Service) formContext(ctx context.Context, env environment.Environment, 
 	}
 	if feature.Type != "form" {
 		return features.Feature{}, FormSchema{}, nil, &ValidationError{Message: "Feature не является формой"}
+	}
+	if s.schemas != nil {
+		schemaID, schema, err := s.schemas.FormSchema(ctx, env, key)
+		if err != nil {
+			return features.Feature{}, FormSchema{}, nil, err
+		}
+		fields := schemaFields(schema)
+		return feature, FormSchema{FeatureID: feature.ID, FeatureKey: feature.Key, VersionID: schemaID, Schema: schema, Environment: env}, fields, nil
 	}
 	var schema json.RawMessage
 	var schemaID uuid.UUID

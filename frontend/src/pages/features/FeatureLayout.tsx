@@ -27,7 +27,6 @@ import {
   FeatureStatusBadge,
   FeatureTypeBadge,
 } from "@/components/common/status-badges";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
@@ -60,7 +59,7 @@ function FeatureTabs({
       to: `/features/${feature.id}/content`,
       label: "Контент",
       icon: Layers,
-      show: feature.type !== "form",
+      show: true,
     },
   ];
   const submissionsActive = activePath.startsWith("/submissions");
@@ -116,6 +115,10 @@ export default function FeatureLayout() {
     queryFn: ({ signal }) => api.features.get(featureId!, signal),
     enabled: Boolean(featureId),
   });
+  const catalogQuery = useQuery({
+    queryKey: queryKeys.content.catalog,
+    queryFn: ({ signal }) => api.siteBuilder.contentFeatures(signal),
+  });
 
   useDocumentTitle(featureQuery.data?.name ?? "Раздел");
 
@@ -139,7 +142,7 @@ export default function FeatureLayout() {
             description="Возможно, ссылка устарела или раздел был удалён."
             action={
               <Button asChild>
-                <Link to="/features">К списку разделов</Link>
+                <Link to="/content">К списку контента</Link>
               </Button>
             }
           />
@@ -159,17 +162,37 @@ export default function FeatureLayout() {
 
   if (!featureQuery.data) return null;
   const feature = featureQuery.data;
+  if (catalogQuery.isLoading) return <LoadingPage label="Проверяем доступность контента…" />;
+  if (catalogQuery.error) {
+    return (
+      <div className="page-grid">
+        <ErrorState error={catalogQuery.error} title="Не удалось проверить контент" onRetry={() => void catalogQuery.refetch()} />
+      </div>
+    );
+  }
+  if (!catalogQuery.data?.items.some((item) => item.id === feature.id)) {
+    return (
+      <div className="page-grid">
+        <EmptyState
+          icon={FileText}
+          title="Фича не входит в активный dev-снапшот"
+          description="Контент становится доступен для редактирования после добавления фичи в dev-снапшот."
+          action={<Button asChild><Link to="/content">К контенту</Link></Button>}
+        />
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-full">
       <div className="border-b border-border bg-card">
         <div className="mx-auto w-full max-w-[var(--content-max)] px-4 pt-4 sm:px-6 lg:px-8">
           <Link
-            to="/features"
+            to="/content"
             className="mb-3 inline-flex items-center gap-1.5 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground"
           >
             <ArrowLeft className="h-3.5 w-3.5" />
-            Все разделы
+            Весь контент
           </Link>
           <div className="flex flex-col gap-3 pb-4 sm:flex-row sm:items-start sm:justify-between">
             <div className="min-w-0">
@@ -182,13 +205,6 @@ export default function FeatureLayout() {
               </div>
               <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1.5 text-xs text-muted-foreground">
                 <code>{feature.key}</code>
-                <span>Ревизия r{feature.revision}</span>
-                {feature.prod && (
-                  <span>Опубликована схема v{feature.prod.version}</span>
-                )}
-                {feature.draft && (
-                  <Badge variant="warning">Черновик схемы v{feature.draft.version}</Badge>
-                )}
               </div>
             </div>
             <div className="flex shrink-0 flex-wrap items-center gap-2">

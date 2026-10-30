@@ -17,7 +17,7 @@ const ExtraDDL = `
 
 ALTER TABLE access_tokens
     ADD CONSTRAINT access_tokens_role_check
-    CHECK (role IN ('admin', 'moderator', 'user'));
+    CHECK (role IN ('admin', 'moderator', 'staff', 'user'));
 
 ALTER TABLE access_tokens
     ADD CONSTRAINT access_tokens_name_check
@@ -462,6 +462,14 @@ ALTER TABLE feature_builds
 ALTER TABLE feature_builds
     ADD CONSTRAINT fk_feature_builds_schema
     FOREIGN KEY (schema_version_id) REFERENCES feature_versions(id) ON DELETE RESTRICT;
+
+ALTER TABLE feature_builds
+    ADD CONSTRAINT fk_feature_builds_submission_schema
+    FOREIGN KEY (submission_schema_version_id) REFERENCES feature_versions(id) ON DELETE RESTRICT;
+
+ALTER TABLE feature_builds
+    ADD CONSTRAINT fk_feature_builds_settings_schema
+    FOREIGN KEY (settings_schema_version_id) REFERENCES feature_versions(id) ON DELETE RESTRICT;
 
 ALTER TABLE feature_builds
     ADD CONSTRAINT fk_feature_builds_creator

@@ -5,7 +5,6 @@ import {
   ArrowRight,
   CheckCircle2,
   CircleDashed,
-  FilePlus2,
   FileText,
   Image,
   Inbox,
@@ -44,14 +43,14 @@ const statDefinitions: Array<{
     label: "Активные разделы",
     description: "Доступные разделы контента",
     icon: Layers,
-    to: "/features?status=active",
+    to: "/content",
   },
   {
     key: "draft_features",
-    label: "Черновики моделей",
-    description: "Изменения контентных моделей",
+    label: "Черновики контента",
+    description: "Контент, ожидающий публикации",
     icon: CircleDashed,
-    to: "/features",
+    to: "/content",
   },
   {
     key: "new_submissions",
@@ -73,8 +72,8 @@ const activityMeta: Record<
   OverviewActivity["kind"],
   { icon: typeof Layers; label: string; to: string }
 > = {
-  feature: { icon: Layers, label: "Раздел", to: "/features" },
-  entry: { icon: FileText, label: "Запись", to: "/features" },
+  feature: { icon: Layers, label: "Раздел", to: "/content" },
+  entry: { icon: FileText, label: "Запись", to: "/content" },
   submission: { icon: Inbox, label: "Заявка", to: "/submissions" },
   media: { icon: Image, label: "Медиа", to: "/media" },
 };
@@ -105,6 +104,7 @@ function OverviewSkeleton() {
 export default function DashboardPage() {
   useDocumentTitle("Главная");
   const auth = useAuth();
+  const canManageSite = auth.principal?.role === "admin" || auth.principal?.role === "moderator";
   const overview = useQuery({
     queryKey: queryKeys.overview,
     queryFn: ({ signal }) => api.overview.get(signal),
@@ -125,6 +125,17 @@ export default function DashboardPage() {
   const hasAnyFeature =
     counts !== undefined &&
     counts.features_active + counts.features_archived > 0;
+  const availableSections = [
+    ["Контент", "Фичи и записи", "/content"],
+    ["Заявки", "Обработка форм", "/submissions"],
+    ["Файлы", "Медиатека", "/media"],
+    ...(canManageSite
+      ? [
+          ["Сайт", "Страницы и снапшоты", "/site"],
+          ["Доступы", "Пользователи и роли", "/access/tokens"],
+        ]
+      : []),
+  ];
 
   return (
     <div className="page-grid">
@@ -134,17 +145,19 @@ export default function DashboardPage() {
         actions={
           <>
             <Button variant="outline" asChild>
-              <Link to="/features">
+              <Link to="/content">
                 <Layers />
-                Все разделы
+                Контент
               </Link>
             </Button>
-            <Button asChild>
-              <Link to="/site">
-                <Plus />
-                Сборки и страницы
-              </Link>
-            </Button>
+            {canManageSite && (
+              <Button asChild>
+                <Link to="/site">
+                  <Plus />
+                  Сборки и страницы
+                </Link>
+              </Button>
+            )}
           </>
         }
       />
@@ -167,7 +180,7 @@ export default function DashboardPage() {
                     </p>
                     <div className="mt-4 flex flex-wrap gap-2">
                       <Button asChild size="sm">
-                        <Link to="/features">Перейти к разделам</Link>
+                        <Link to="/content">Открыть контент</Link>
                       </Button>
                       <Button asChild size="sm" variant="outline">
                         <Link to="/submissions">Открыть заявки</Link>
@@ -183,13 +196,13 @@ export default function DashboardPage() {
               <div className="grid gap-4 lg:grid-cols-[1.4fr_1fr]">
                 <EmptyState
                   icon={Sparkles}
-                  title="Начните работу с CMS"
-                  description="Создайте раздел, определите схему, добавьте запись и опубликуйте контент. После этого здесь появится операционная сводка."
+                  title="Работайте с контентом"
+                  description="Откройте фичу из dev-снапшота, заполните её поля и опубликуйте контент."
                   action={
                     <Button asChild>
-                      <Link to="/site">
-                        <FilePlus2 />
-                        Собрать сайт из фич
+                      <Link to="/content">
+                        <FileText />
+                        Открыть контент
                       </Link>
                     </Button>
                   }
@@ -199,13 +212,7 @@ export default function DashboardPage() {
                   <CardContent className="p-5">
                     <h2 className="text-sm font-semibold">Доступные разделы</h2>
                     <div className="mt-3 space-y-2">
-                      {[
-                        ["Разделы", "Схемы и контент", "/features"],
-                        ["Заявки", "Обработка форм", "/submissions"],
-                        ["Медиа", "Загрузки и медиатека", "/media"],
-                        ["Сайт", "Страницы и снапшоты", "/site"],
-                        ["Токены", "Доступы и роли", "/access/tokens"],
-                      ].map(([title, text, to]) => (
+                      {availableSections.map(([title, text, to]) => (
                         <Link
                           key={to}
                           to={to}
@@ -258,7 +265,7 @@ export default function DashboardPage() {
             })}
           </section>
 
-          {auth.principal && auth.principal.role !== "user" && <SiteStatusCard />}
+          {canManageSite && <SiteStatusCard />}
 
           <div className="grid gap-4 xl:grid-cols-[1.25fr_1fr]">
             <section className="rounded-lg border border-border bg-card" aria-labelledby="attention-title">
@@ -399,14 +406,14 @@ export default function DashboardPage() {
             </section>
           </div>
 
-          {!hasAnyFeature && (
+          {!hasAnyFeature && canManageSite && (
             <section className="rounded-lg border border-border bg-card p-5">
               <h2 className="text-sm font-semibold">Быстрый старт</h2>
               <ol className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
                 {[
                   ["1", "Загрузить фичи", "Импортировать ZIP-сборки с манифестами", "/site"],
                   ["2", "Собрать страницы", "Настроить маршруты и размещения", "/site"],
-                  ["3", "Добавить контент", "Заполнить поля из манифестов", "/features"],
+                  ["3", "Добавить контент", "Заполнить поля из манифестов", "/content"],
                   ["4", "Опубликовать снапшот", "Проверить dev и продвинуть в prod", "/site"],
                 ].map(([step, title, text, to]) => (
                   <li key={step}>

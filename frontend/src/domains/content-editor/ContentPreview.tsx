@@ -145,6 +145,9 @@ function FieldPreview({
       </figure>
     );
   }
+  if (typeof value === "string" && field.type === "file" && value) {
+    return <p className="mb-4">{label}<a className="text-primary underline" href={publicMediaPath(value)} target="_blank" rel="noreferrer">Открыть файл</a></p>;
+  }
   if (field.type === "richText" && typeof value === "string" && value.trim()) {
     return (
       <div className="mb-4">
@@ -198,6 +201,10 @@ function FieldPreview({
               />
             ))}
           </div>
+        ) : field.itemType === "file" ? (
+          <ul className="list-disc pl-5 text-sm">
+            {value.map((item, index) => <li key={index}><a className="text-primary underline" href={publicMediaPath(String(item))} target="_blank" rel="noreferrer">Открыть файл</a></li>)}
+          </ul>
         ) : (
           <ul className="list-disc pl-5 text-sm">
             {value.map((item, index) => (
@@ -255,6 +262,9 @@ function CellPreview({
 }) {
   if (typeof value === "string" && field.type === "media" && value) {
     return <img src={publicMediaPath(value)} alt="" className="max-h-12 rounded" />;
+  }
+  if (typeof value === "string" && field.type === "file" && value) {
+    return <a className="text-primary underline" href={publicMediaPath(value)} target="_blank" rel="noreferrer">Файл</a>;
   }
   if (field.type === "richText" && typeof value === "string") {
     return <MarkdownText source={value} />;

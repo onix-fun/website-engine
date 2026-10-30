@@ -6,6 +6,10 @@ export const queryKeys = {
     draft: (id: string) => ["features", "draft", id] as const,
     versions: (id: string) => ["features", "versions", id] as const,
   },
+  content: {
+    catalog: ["content", "catalog"] as const,
+    settings: (featureId: string) => ["content", "settings", featureId] as const,
+  },
   entries: {
     all: ["entries"] as const,
     list: (featureId: string, params: Record<string, unknown> = {}) =>

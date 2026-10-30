@@ -88,6 +88,7 @@ function buildUi(field: SchemaFieldNode): JsonObject | null {
   if (field.type === "text") ui.widget = "textarea";
   if (field.type === "richText") ui.widget = "richText";
   if (field.type === "media") ui.widget = "media";
+  if (field.type === "file") ui.widget = "file";
   if (field.type === "blocks") {
     ui.widget = "blocks";
     ui.allowedBlocks = field.allowedBlocks.filter((block) =>
@@ -238,6 +239,8 @@ function buildArrayItemSchema(field: SchemaFieldNode): JsonObject {
     }
     case "media":
       return { type: "string", format: "media" };
+    case "file":
+      return { type: "string", format: "file" };
     case "string":
     default:
       return { type: "string" };
@@ -258,6 +261,12 @@ function fieldToSchema(field: SchemaFieldNode): JsonObject {
       if (field.type === "date") schema.format = "date";
       if (field.type === "dateTime") schema.format = "date-time";
       if (field.type === "media") schema.format = "media";
+      if (field.minLength !== undefined) schema.minLength = field.minLength;
+      if (field.maxLength !== undefined) schema.maxLength = field.maxLength;
+      return applyCommon(schema, field);
+    }
+    case "file": {
+      const schema: JsonObject = { type: nullableType("string", field.nullable), format: "file" };
       if (field.minLength !== undefined) schema.minLength = field.minLength;
       if (field.maxLength !== undefined) schema.maxLength = field.maxLength;
       return applyCommon(schema, field);
@@ -456,6 +465,7 @@ function parseField(
     if (format === "date") return createField("date", base);
     if (format === "date-time") return createField("dateTime", base);
     if (format === "media" || widget === "media") return createField("media", base);
+    if (format === "file" || widget === "file") return createField("file", base);
     if (widget === "richText") return createField("richText", base);
     if (widget === "textarea" || widget === "text") return createField("text", base);
     return createField("string", base);
@@ -515,6 +525,9 @@ function parseField(
     }
     if (items.format === "media") {
       return createField("array", { ...base, itemType: "media" });
+    }
+    if (items.format === "file") {
+      return createField("array", { ...base, itemType: "file" });
     }
     const itemType: ArrayItemType =
       itemTypeRaw === "number" ||

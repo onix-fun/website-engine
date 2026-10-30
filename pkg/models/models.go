@@ -207,16 +207,18 @@ func (SiteEnvironment) TableName() string { return "site_environments" }
 
 // FeatureBuild is an immutable ESM artifact and its developer-authored manifest.
 type FeatureBuild struct {
-	ID              UUID      `gorm:"column:id;primaryKey;not null;uniqueIndex:uq_feature_builds_identity,priority:1"`
-	FeatureID       UUID      `gorm:"column:feature_id;not null;uniqueIndex:uq_feature_builds_feature_version,priority:1;uniqueIndex:uq_feature_builds_identity,priority:2;index:idx_feature_builds_feature,priority:1"`
-	Version         string    `gorm:"column:version;not null;uniqueIndex:uq_feature_builds_feature_version,priority:2"`
-	SchemaVersionID UUID      `gorm:"column:schema_version_id;not null;index:idx_feature_builds_schema"`
-	Digest          string    `gorm:"column:digest;not null;uniqueIndex:uq_feature_builds_digest"`
-	ArtifactSize    int64     `gorm:"column:artifact_size;not null"`
-	Manifest        JSONB     `gorm:"column:manifest;not null"`
-	Assets          JSONB     `gorm:"column:assets;not null"`
-	CreatedBy       *UUID     `gorm:"column:created_by"`
-	CreatedAt       time.Time `gorm:"column:created_at;not null;default:now();index:idx_feature_builds_feature,priority:2,sort:desc"`
+	ID                        UUID      `gorm:"column:id;primaryKey;not null;uniqueIndex:uq_feature_builds_identity,priority:1"`
+	FeatureID                 UUID      `gorm:"column:feature_id;not null;uniqueIndex:uq_feature_builds_feature_version,priority:1;uniqueIndex:uq_feature_builds_identity,priority:2;index:idx_feature_builds_feature,priority:1"`
+	Version                   string    `gorm:"column:version;not null;uniqueIndex:uq_feature_builds_feature_version,priority:2"`
+	SchemaVersionID           UUID      `gorm:"column:schema_version_id;not null;index:idx_feature_builds_schema"`
+	SettingsSchemaVersionID  *UUID     `gorm:"column:settings_schema_version_id"`
+	SubmissionSchemaVersionID *UUID     `gorm:"column:submission_schema_version_id"`
+	Digest                    string    `gorm:"column:digest;not null;uniqueIndex:uq_feature_builds_digest"`
+	ArtifactSize              int64     `gorm:"column:artifact_size;not null"`
+	Manifest                  JSONB     `gorm:"column:manifest;not null"`
+	Assets                    JSONB     `gorm:"column:assets;not null"`
+	CreatedBy                 *UUID     `gorm:"column:created_by"`
+	CreatedAt                 time.Time `gorm:"column:created_at;not null;default:now();index:idx_feature_builds_feature,priority:2,sort:desc"`
 }
 
 func (FeatureBuild) TableName() string { return "feature_builds" }

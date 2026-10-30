@@ -30,7 +30,9 @@ type Composition = {
   placements: RuntimePlacement[];
 };
 
-type FeatureProps = Record<string, unknown> & {
+type FeatureProps = {
+	content: Record<string, unknown>;
+	arguments: Record<string, unknown>;
   featureKey: string;
   sdk: RuntimeSDK;
   collectionEndpoint?: string;
@@ -118,8 +120,8 @@ function FeatureMount({ placement }: { placement: RuntimePlacement }) {
   if (error) return <div className="runtime-feature-error">Не удалось загрузить раздел</div>;
   if (!Feature) return <div className="runtime-loading" aria-hidden="true" />;
   const props = {
-    ...(placement.content ?? {}),
-    ...placement.arguments,
+	content: placement.content ?? {},
+	arguments: placement.arguments,
     featureKey: placement.featureKey,
     collectionEndpoint: placement.collectionEndpoint,
     detailLink: placement.detailLink,

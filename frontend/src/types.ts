@@ -11,7 +11,7 @@ export type JsonValue =
 
 export type JsonObject = { [key: string]: JsonValue };
 
-export type Role = "admin" | "moderator" | "user";
+export type Role = "admin" | "moderator" | "staff" | "user";
 export type FeatureType = "collection" | "single" | "form";
 export type FeatureStatus = "active" | "archived";
 export type VersionStatus = "draft" | "published";
@@ -105,10 +105,22 @@ export interface FeatureDraftState {
   prod: FeatureVersion | null;
 }
 
+export interface ContentFeature {
+  id: string;
+  key: string;
+  name: string;
+  mode: FeatureType;
+  version: string;
+  schema: JsonObject;
+  settingsSchema?: JsonObject;
+  submissionSchema?: JsonObject;
+}
+
 export interface EntryDetail {
   id: string;
   feature_id: string;
   single_slot: boolean;
+  sort_order: number;
   revision: number;
   draft_version_id: string | null;
   dev_version_id: string | null;
@@ -188,6 +200,7 @@ export interface EntryListParams {
   q?: string;
   limit?: number;
   cursor?: string | null;
+  sort?: "manual";
 }
 
 export interface MediaListParams {

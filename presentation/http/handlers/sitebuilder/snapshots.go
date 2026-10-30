@@ -155,6 +155,15 @@ func (h *SnapshotsHandler) Runtime(w http.ResponseWriter, r *http.Request) {
 	response.JSON(w, http.StatusOK, composition)
 }
 
+func (h *SnapshotsHandler) ContentCatalog(w http.ResponseWriter, r *http.Request) {
+	items, err := h.service.ContentCatalog(r.Context())
+	if err != nil {
+		h.writeError(w, r, err)
+		return
+	}
+	response.JSON(w, http.StatusOK, map[string]any{"items": items})
+}
+
 func (h *SnapshotsHandler) Collection(w http.ResponseWriter, r *http.Request) {
 	offset, err := parseNonnegative(r.URL.Query().Get("offset"))
 	if err != nil {

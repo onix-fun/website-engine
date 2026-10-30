@@ -37,12 +37,25 @@ func (h *Handler) ListEntries(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	includeArchived := r.URL.Query().Get("include_archived") == "true"
-	items, next, err := h.service.List(r.Context(), featureID, includeArchived, r.URL.Query().Get("q"), r.URL.Query().Get("cursor"), limit)
+	items, next, err := h.service.List(r.Context(), featureID, includeArchived, r.URL.Query().Get("q"), r.URL.Query().Get("cursor"), limit, r.URL.Query().Get("sort") == "manual")
 	if err != nil {
 		h.writeError(w, r, err)
 		return
 	}
 	response.JSON(w, http.StatusOK, map[string]any{"items": items, "next_cursor": nullable(next)})
+}
+
+func (h *Handler) GetSettings(w http.ResponseWriter, r *http.Request) {
+	featureID, ok := uuidParam(w, r, "id", "Раздел не найден")
+	if !ok {
+		return
+	}
+	item, err := h.service.GetSettings(r.Context(), featureID)
+	if err != nil {
+		h.writeError(w, r, err)
+		return
+	}
+	response.JSON(w, http.StatusOK, item)
 }
 
 type reorderRequest struct {
@@ -60,6 +73,29 @@ func (h *Handler) Reorder(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := h.service.Reorder(r.Context(), featureID, req.EntryIDs); err != nil {
+		h.writeError(w, r, err)
+		return
+	}
+	response.NoContent(w)
+}
+
+func (h *Handler) Move(w http.ResponseWriter, r *http.Request) {
+	featureID, ok := uuidParam(w, r, "id", "Feature не найден")
+	if !ok {
+		return
+	}
+	entryID, ok := uuidParam(w, r, "entryId", "Запись не найдена")
+	if !ok {
+		return
+	}
+	var req struct {
+		Direction string `json:"direction"`
+	}
+	if err := response.DecodeJSON(w, r, &req, h.maxJSON); err != nil {
+		response.WriteDecodeError(w, r, err)
+		return
+	}
+	if err := h.service.Move(r.Context(), featureID, entryID, req.Direction); err != nil {
 		h.writeError(w, r, err)
 		return
 	}
@@ -87,6 +123,25 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	response.JSON(w, http.StatusCreated, detail)
+}
+
+func (h *Handler) CreateSettings(w http.ResponseWriter, r *http.Request) {
+	actor, _ := principal.FromContext(r.Context())
+	featureID, ok := uuidParam(w, r, "id", "Раздел не найден")
+	if !ok {
+		return
+	}
+	var req dataRequest
+	if err := response.DecodeJSON(w, r, &req, h.maxJSON); err != nil {
+		response.WriteDecodeError(w, r, err)
+		return
+	}
+	item, err := h.service.CreateSettings(r.Context(), actor, featureID, req.Data)
+	if err != nil {
+		h.writeError(w, r, err)
+		return
+	}
+	response.JSON(w, http.StatusCreated, item)
 }
 
 type importRequest struct {

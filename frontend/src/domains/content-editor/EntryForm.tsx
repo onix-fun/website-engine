@@ -3,6 +3,7 @@ import {
   ArrowDown,
   ArrowUp,
   Braces,
+  File as FileIcon,
   ImagePlus,
   Lock,
   Plus,
@@ -50,6 +51,7 @@ export interface EntryFormIssue {
 export interface MediaPickTarget {
   label: string;
   single: boolean;
+  accept?: "image" | "all";
   apply: (media: Media[]) => void;
 }
 
@@ -64,7 +66,7 @@ function cloneOriginal<T extends JsonValue>(value: T): T {
 function isEmptyValue(field: SchemaFieldNode, value: JsonValue | undefined): boolean {
   if (value === undefined || value === null) return true;
   if (typeof value === "string") {
-    return field.type === "media" ? value.trim() === "" : !value.trim();
+    return field.type === "media" || field.type === "file" ? value.trim() === "" : !value.trim();
   }
   if (Array.isArray(value)) return value.length === 0;
   if (isRecordValue(value)) return Object.keys(value).length === 0;
@@ -150,10 +152,9 @@ function validateField(
         issues.push({ path, message: "Некорректная дата" });
       }
       break;
-    case "media": {
-      if (Array.isArray(value) || (typeof value === "object" && value !== null)) {
-        issues.push({ path, message: "Выберите один файл из медиатеки" });
-      }
+    case "media":
+    case "file": {
+      if (typeof value !== "string") issues.push({ path, message: "Выберите файл из медиатеки" });
       break;
     }
     case "array": {
@@ -272,12 +273,14 @@ function FieldCard({
 
 function MediaValue({
   mediaId,
+  variant = "image",
   onPick,
   onClear,
   disabled,
   compact,
 }: {
   mediaId: string;
+  variant?: "image" | "file";
   onPick: () => void;
   onClear: () => void;
   disabled?: boolean;
@@ -287,11 +290,14 @@ function MediaValue({
     <div className="space-y-2">
       {mediaId ? (
         <div className="overflow-hidden rounded-md border border-border">
-          <img
-            src={publicMediaPath(mediaId)}
-            alt=""
-            className={compact ? "h-14 w-full object-cover" : "max-h-56 w-full object-cover"}
-          />
+          {variant === "image" ? (
+            <img src={publicMediaPath(mediaId)} alt="" className={compact ? "h-14 w-full object-cover" : "max-h-56 w-full object-cover"} />
+          ) : (
+            <a href={publicMediaPath(mediaId)} target="_blank" rel="noreferrer" className="flex items-center gap-2 px-3 py-4 text-sm hover:bg-muted/30">
+              <FileIcon className="h-5 w-5 text-muted-foreground" />
+              Открыть файл
+            </a>
+          )}
           <div className="flex items-center justify-between gap-2 border-t border-border bg-muted/30 px-2 py-1.5">
             <code className="truncate text-2xs text-muted-foreground">{mediaId}</code>
             <div className="flex gap-1">
@@ -319,7 +325,7 @@ function MediaValue({
           className="flex w-full items-center justify-center gap-2 rounded-md border border-dashed border-border px-3 py-5 text-xs text-muted-foreground hover:border-primary/40 hover:bg-muted/30 disabled:opacity-50"
         >
           <ImagePlus className="h-4 w-4" />
-          Выбрать из медиатеки
+          {variant === "image" ? "Выбрать изображение" : "Выбрать файл"}
         </button>
       )}
     </div>
@@ -470,15 +476,18 @@ function ScalarControl({
       );
     }
     case "media":
+    case "file":
       return (
         <MediaValue
           mediaId={typeof value === "string" ? value : ""}
+          variant={field.type === "file" ? "file" : "image"}
           disabled={disabled}
           compact={compact}
           onPick={() =>
             onPickMedia({
               label: field.label || field.key,
               single: true,
+              accept: field.type === "file" ? "all" : "image",
               apply: (media) => {
                 const first = media[0];
                 if (first) onChange(first.id);
@@ -576,15 +585,17 @@ function ArrayTable({
     setCell: (value: JsonValue) => void,
     cellPath: string,
   ): ReactNode => {
-    if (child.type === "media") {
+    if (child.type === "media" || child.type === "file") {
       return (
         <MediaValue
           mediaId={typeof cellValue === "string" ? cellValue : ""}
+          variant={child.type === "file" ? "file" : "image"}
           disabled={disabled}
           onPick={() =>
             onPickMedia({
               label: `${field.label || field.key} · ${child.label || child.key}`,
               single: true,
+              accept: child.type === "file" ? "all" : "image",
               apply: (media) => {
                 const first = media[0];
                 if (first) setCell(first.id);
@@ -794,18 +805,20 @@ function ScalarArrayList({
     <div className="space-y-2">
       {value.map((item, index) => {
         const itemPath = `${path}.${index}`;
-        if (field.itemType === "media") {
+        if (field.itemType === "media" || field.itemType === "file") {
           return (
             <div key={index} className="flex items-start gap-2">
               <div className="min-w-0 flex-1">
                 <MediaValue
                   mediaId={typeof item === "string" ? item : ""}
+                  variant={field.itemType === "file" ? "file" : "image"}
                   disabled={disabled}
                   compact
                   onPick={() =>
                     onPickMedia({
                       label: `${field.label || field.key} (${index + 1})`,
                       single: true,
+                      accept: field.itemType === "file" ? "all" : "image",
                       apply: (media) => {
                         const first = media[0];
                         if (first) {
@@ -1237,7 +1250,7 @@ export function EntryFieldsForm({
           target.apply(apply);
         }}
         mode={mediaTarget?.single === false ? "multiple" : "single"}
-        accept="all"
+        accept={mediaTarget?.accept ?? "image"}
         title={mediaTarget ? `Выбрать: ${mediaTarget.label}` : "Выбрать файл"}
       />
 

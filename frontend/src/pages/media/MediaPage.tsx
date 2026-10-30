@@ -22,6 +22,7 @@ import {
   X,
 } from "lucide-react";
 import { toast } from "sonner";
+import { useAuth } from "@/app/auth";
 import {
   api,
   absolutePublicMediaUrl,
@@ -555,6 +556,8 @@ function MediaDetailDialog({
   open: boolean;
   onClose: () => void;
 }) {
+  const { principal } = useAuth();
+  const canDelete = principal?.role === "admin";
   const queryClient = useQueryClient();
   const confirm = useConfirm();
   const [filename, setFilename] = useState(media?.original_filename ?? "");
@@ -748,15 +751,17 @@ function MediaDetailDialog({
         </div>
 
         <DialogFooter className="flex-wrap items-center justify-between gap-2">
-          <Button
-            variant="ghost"
-            className="text-destructive hover:text-destructive"
-            onClick={() => void requestDelete()}
-            disabled={deleteMutation.isPending}
-          >
-            <Trash2 />
-            Удалить
-          </Button>
+          {canDelete && (
+            <Button
+              variant="ghost"
+              className="text-destructive hover:text-destructive"
+              onClick={() => void requestDelete()}
+              disabled={deleteMutation.isPending}
+            >
+              <Trash2 />
+              Удалить
+            </Button>
+          )}
           <div className="flex flex-wrap gap-2">
             <Button
               variant="outline"
@@ -786,6 +791,8 @@ function MediaActions({
   media: Media;
   onOpen: () => void;
 }) {
+  const { principal } = useAuth();
+  const canDelete = principal?.role === "admin";
   const queryClient = useQueryClient();
   const confirm = useConfirm();
 
@@ -866,15 +873,19 @@ function MediaActions({
           <Download className="h-4 w-4" />
           Скачать
         </DropdownMenuItem>
-        <DropdownMenuSeparator />
-        <DropdownMenuItem
-          className="text-destructive focus:text-destructive"
-          onSelect={() => void requestDelete()}
-          disabled={deleteMutation.isPending}
-        >
-          <Trash2 className="h-4 w-4" />
-          Удалить…
-        </DropdownMenuItem>
+        {canDelete && (
+          <>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem
+              className="text-destructive focus:text-destructive"
+              onSelect={() => void requestDelete()}
+              disabled={deleteMutation.isPending}
+            >
+              <Trash2 className="h-4 w-4" />
+              Удалить…
+            </DropdownMenuItem>
+          </>
+        )}
       </DropdownMenuContent>
     </DropdownMenu>
   );

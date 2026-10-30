@@ -64,17 +64,20 @@ interface NavItem {
   match?: (pathname: string) => boolean;
 }
 
-const primaryNav: NavItem[] = [
+const homeNav: NavItem[] = [
   { to: "/", label: "Главная", icon: LayoutDashboard, end: true },
-  { to: "/features", label: "Разделы", icon: Layers, match: (p) => p.startsWith("/features") },
-  { to: "/submissions", label: "Заявки", icon: Inbox, match: (p) => p.startsWith("/submissions") },
-  { to: "/media", label: "Медиа", icon: Image, match: (p) => p.startsWith("/media") },
-  { to: "/site", label: "Сайт", icon: Layers, match: (p) => p.startsWith("/site") },
-  { to: "/access/tokens", label: "Доступы", icon: ShieldCheck, match: (p) => p.startsWith("/access") },
 ];
 
-const secondaryNav: NavItem[] = [
+const siteSettingsNav: NavItem[] = [
+  { to: "/site", label: "Сайт", icon: Layers, match: (p) => p.startsWith("/site") },
+  { to: "/access/tokens", label: "Доступы", icon: ShieldCheck, match: (p) => p.startsWith("/access") },
   { to: "/settings", label: "Настройки", icon: Settings, match: (p) => p.startsWith("/settings") },
+];
+
+const contentNav: NavItem[] = [
+  { to: "/content", label: "Контент", icon: Layers, match: (p) => p.startsWith("/content") || /^\/features\/[^/]+/.test(p) },
+  { to: "/media", label: "Файлы", icon: Image, match: (p) => p.startsWith("/media") },
+  { to: "/submissions", label: "Заявки", icon: Inbox, match: (p) => p.startsWith("/submissions") },
 ];
 
 function Brand({ compact = false }: { compact?: boolean }) {
@@ -120,7 +123,7 @@ function UserMenu({
           <RoleBadge role={principal.role} />
         </div>
         <DropdownMenuSeparator />
-        {principal.role !== "user" && (
+        {(principal.role === "admin" || principal.role === "moderator") && (
           <DropdownMenuItem asChild>
             <Link to="/access/tokens">
               <KeyRound className="h-4 w-4" />
@@ -128,7 +131,7 @@ function UserMenu({
             </Link>
           </DropdownMenuItem>
         )}
-        {principal.role !== "user" && (
+        {(principal.role === "admin" || principal.role === "moderator") && (
           <DropdownMenuItem asChild>
             <Link to="/settings">
               <Settings className="h-4 w-4" />
@@ -214,7 +217,7 @@ function SidebarContent({
   onNavigate?: () => void;
 }) {
   const { principal } = useAuth();
-  const staff = principal?.role !== "user";
+  const siteManager = principal?.role === "admin" || principal?.role === "moderator";
   return (
     <div className="flex h-full min-h-0 flex-col">
       <div
@@ -248,23 +251,17 @@ function SidebarContent({
         className={cn("flex-1 overflow-y-auto py-3 thin-scrollbar", collapsed ? "px-2" : "px-3")}
         aria-label="Основная навигация"
       >
-        {!collapsed && (
-          <p className="mb-2 px-2 text-2xs font-medium uppercase tracking-wider text-sidebar-muted">
-            Рабочая область
-          </p>
+        <NavList collapsed={collapsed} items={homeNav} onNavigate={onNavigate} />
+        {siteManager && (
+          <>
+            <div className="my-4 border-t border-sidebar-border" />
+            {!collapsed && <p className="mb-2 px-2 text-2xs font-medium uppercase tracking-wider text-sidebar-muted">Настройки сайта</p>}
+            <NavList collapsed={collapsed} items={siteSettingsNav} onNavigate={onNavigate} />
+          </>
         )}
-        <NavList
-          collapsed={collapsed}
-          items={primaryNav.filter((item) => !item.to.startsWith("/access") || staff)}
-          onNavigate={onNavigate}
-        />
         <div className="my-4 border-t border-sidebar-border" />
-        {!collapsed && (
-          <p className="mb-2 px-2 text-2xs font-medium uppercase tracking-wider text-sidebar-muted">
-            Система
-          </p>
-        )}
-        {staff && <NavList collapsed={collapsed} items={secondaryNav} onNavigate={onNavigate} />}
+        {!collapsed && <p className="mb-2 px-2 text-2xs font-medium uppercase tracking-wider text-sidebar-muted">Контент</p>}
+        <NavList collapsed={collapsed} items={contentNav} onNavigate={onNavigate} />
       </nav>
 
       <div className={cn("shrink-0 border-t border-sidebar-border p-3", collapsed && "px-2")}>

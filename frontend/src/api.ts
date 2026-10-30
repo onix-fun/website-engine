@@ -4,6 +4,7 @@ import type {
   CreateFeatureInput,
   CreateTokenInput,
   CreatedToken,
+  ContentFeature,
   EntryDetail,
   EntryListParams,
   EntryVersion,
@@ -456,6 +457,7 @@ export const api = {
             q: params.q,
             limit: params.limit,
             cursor: params.cursor,
+            sort: params.sort,
           },
         },
       );
@@ -465,6 +467,21 @@ export const api = {
         `${ADMIN_ROOT}/features/${encoded(featureId)}/entries`,
         { method: "POST", body: { data } },
       );
+    },
+    getSettings(featureId: string, signal?: AbortSignal): Promise<EntryDetail> {
+      return request<EntryDetail>(`/api/v2/admin/features/${encoded(featureId)}/settings`, { signal });
+    },
+    createSettings(featureId: string, data: JsonObject): Promise<EntryDetail> {
+      return request<EntryDetail>(`/api/v2/admin/features/${encoded(featureId)}/settings`, {
+        method: "POST",
+        body: { data },
+      });
+    },
+    move(featureId: string, entryId: string, direction: "up" | "down"): Promise<void> {
+      return request<void>(`/api/v2/admin/features/${encoded(featureId)}/entries/${encoded(entryId)}/move`, {
+        method: "PUT",
+        body: { direction },
+      });
     },
     import(
       featureId: string,
@@ -688,6 +705,9 @@ export const api = {
   },
 
   siteBuilder: {
+    contentFeatures(signal?: AbortSignal): Promise<{ items: ContentFeature[] }> {
+      return requestItems<ContentFeature>(`${ADMIN_V2_ROOT}/content/features`, { signal });
+    },
     featureBuilds(signal?: AbortSignal): Promise<{ items: FeatureBuild[] }> {
       return requestItems<FeatureBuild>(`${ADMIN_V2_ROOT}/feature-builds`, { signal });
     },

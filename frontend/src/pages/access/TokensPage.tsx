@@ -132,6 +132,7 @@ function CreateTokenDialog({
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="user">{roleLabels.user}</SelectItem>
+                <SelectItem value="staff">{roleLabels.staff}</SelectItem>
                 <SelectItem value="moderator">{roleLabels.moderator}</SelectItem>
                 <SelectItem value="admin">{roleLabels.admin}</SelectItem>
               </SelectContent>

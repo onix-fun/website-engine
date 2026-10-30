@@ -128,10 +128,12 @@ func run(log *slog.Logger) error {
 
 	contentRepo := content.NewRepository(pool)
 	contentService := content.NewService(contentRepo, featureRepo)
+	contentService.SetSchemaProvider(snapshotService)
 	contentHandler := hcontent.NewHandler(contentService, log, cfg.MaxJSONBytes)
 
 	formsRepo := forms.NewRepository(pool)
 	formsService := forms.NewService(formsRepo, featureRepo)
+	formsService.SetSnapshotSchemaProvider(snapshotService)
 	formsHandler := hforms.NewHandler(formsService, log, cfg.MaxJSONBytes)
 	snapshotHandler := hsitebuilder.NewSnapshotsHandler(snapshotService, formsService, log, cfg.MaxJSONBytes)
 

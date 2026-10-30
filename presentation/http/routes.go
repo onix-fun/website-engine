@@ -63,8 +63,8 @@ func NewRouter(d Deps) http.Handler {
 	user := func(h http.HandlerFunc) http.Handler {
 		return authMW(middleware.RequireUser(http.HandlerFunc(h)))
 	}
-	staff := func(h http.HandlerFunc) http.Handler {
-		return authMW(middleware.RequireStaff(http.HandlerFunc(h)))
+	siteManager := func(h http.HandlerFunc) http.Handler {
+		return authMW(middleware.RequireSiteManager(http.HandlerFunc(h)))
 	}
 	admin := func(h http.HandlerFunc) http.Handler {
 		return authMW(middleware.RequireAdmin(http.HandlerFunc(h)))
@@ -73,8 +73,8 @@ func NewRouter(d Deps) http.Handler {
 	jsonUser := func(h http.HandlerFunc) http.Handler {
 		return jsonLimit(user(h))
 	}
-	jsonStaff := func(h http.HandlerFunc) http.Handler {
-		return jsonLimit(staff(h))
+	jsonSiteManager := func(h http.HandlerFunc) http.Handler {
+		return jsonLimit(siteManager(h))
 	}
 
 	// Service health.
@@ -96,19 +96,19 @@ func NewRouter(d Deps) http.Handler {
 
 	// Current token and token management.
 	mux.Handle("GET /api/v1/admin/me", authMW(http.HandlerFunc(d.Auth.Me)))
-	mux.Handle("GET /api/v1/admin/tokens", staff(d.Auth.ListTokens))
-	mux.Handle("POST /api/v1/admin/tokens", jsonStaff(d.Auth.CreateToken))
-	mux.Handle("GET /api/v1/admin/tokens/{id}", staff(d.Auth.GetToken))
-	mux.Handle("DELETE /api/v1/admin/tokens/{id}", staff(d.Auth.RevokeToken))
+	mux.Handle("GET /api/v1/admin/tokens", siteManager(d.Auth.ListTokens))
+	mux.Handle("POST /api/v1/admin/tokens", jsonSiteManager(d.Auth.CreateToken))
+	mux.Handle("GET /api/v1/admin/tokens/{id}", siteManager(d.Auth.GetToken))
+	mux.Handle("DELETE /api/v1/admin/tokens/{id}", siteManager(d.Auth.RevokeToken))
 
 	// Sanitized runtime configuration for the admin settings section.
 	if d.Settings != nil {
-		mux.Handle("GET /api/v1/admin/settings", staff(http.HandlerFunc(d.Settings.Get)))
+		mux.Handle("GET /api/v1/admin/settings", siteManager(http.HandlerFunc(d.Settings.Get)))
 	}
 
 	// Content publication audit feed.
 	if d.PublicationEvents != nil {
-		mux.Handle("GET /api/v1/admin/publication-events", staff(d.PublicationEvents.List))
+		mux.Handle("GET /api/v1/admin/publication-events", siteManager(d.PublicationEvents.List))
 	}
 
 	// Operational summary for the admin dashboard.
@@ -116,30 +116,36 @@ func NewRouter(d Deps) http.Handler {
 
 	// Feature metadata and schema publication.
 	if d.FeatureBuilds != nil {
-		mux.Handle("GET /api/v2/admin/feature-builds", user(d.FeatureBuilds.List))
-		mux.Handle("POST /api/v2/admin/feature-builds", staff(d.FeatureBuilds.Import))
+		mux.Handle("GET /api/v2/admin/feature-builds", siteManager(d.FeatureBuilds.List))
+		mux.Handle("POST /api/v2/admin/feature-builds", siteManager(d.FeatureBuilds.Import))
 	}
 	if d.SiteSnapshots != nil {
-		mux.Handle("GET /api/v2/admin/site/draft", user(d.SiteSnapshots.Draft))
-		mux.Handle("PUT /api/v2/admin/site/draft", jsonStaff(d.SiteSnapshots.SaveDraft))
-		mux.Handle("GET /api/v2/admin/site/snapshots", user(d.SiteSnapshots.List))
-		mux.Handle("POST /api/v2/admin/site/snapshots", jsonStaff(d.SiteSnapshots.Publish))
-		mux.Handle("POST /api/v2/admin/site/snapshots/{id}/promote", jsonLimit(admin(d.SiteSnapshots.Promote)))
-		mux.Handle("POST /api/v2/admin/site/snapshots/{id}/rollback", jsonLimit(admin(d.SiteSnapshots.Rollback)))
+		mux.Handle("GET /api/v2/admin/content/features", user(d.SiteSnapshots.ContentCatalog))
+		mux.Handle("GET /api/v2/admin/site/draft", siteManager(d.SiteSnapshots.Draft))
+		mux.Handle("PUT /api/v2/admin/site/draft", jsonSiteManager(d.SiteSnapshots.SaveDraft))
+		mux.Handle("GET /api/v2/admin/site/snapshots", siteManager(d.SiteSnapshots.List))
+		mux.Handle("POST /api/v2/admin/site/snapshots", jsonSiteManager(d.SiteSnapshots.Publish))
+		mux.Handle("POST /api/v2/admin/site/snapshots/{id}/promote", jsonSiteManager(d.SiteSnapshots.Promote))
+		mux.Handle("POST /api/v2/admin/site/snapshots/{id}/rollback", jsonSiteManager(d.SiteSnapshots.Rollback))
 	}
+	// Content users may read feature metadata and schemas needed to edit content
+	// and interpret existing form submissions. Site mutations remain restricted.
 	mux.Handle("GET /api/v1/admin/features", user(d.Features.List))
-	mux.Handle("POST /api/v1/admin/features", jsonStaff(d.Features.Create))
+	mux.Handle("POST /api/v1/admin/features", jsonSiteManager(d.Features.Create))
 	mux.Handle("GET /api/v1/admin/features/{id}", user(d.Features.Get))
-	mux.Handle("PATCH /api/v1/admin/features/{id}", jsonStaff(d.Features.Update))
-	mux.Handle("POST /api/v1/admin/features/{id}/archive", staff(d.Features.Archive))
+	mux.Handle("PATCH /api/v1/admin/features/{id}", jsonSiteManager(d.Features.Update))
+	mux.Handle("POST /api/v1/admin/features/{id}/archive", siteManager(d.Features.Archive))
 	mux.Handle("GET /api/v1/admin/features/{id}/versions", user(d.Features.Versions))
 	mux.Handle("GET /api/v1/admin/features/{id}/draft", user(d.Features.Draft))
-	mux.Handle("PUT /api/v1/admin/features/{id}/draft", jsonStaff(d.Features.SaveDraft))
-	mux.Handle("POST /api/v1/admin/features/{id}/publish", jsonStaff(d.Features.Publish))
-	mux.Handle("POST /api/v1/admin/features/{id}/promote", jsonStaff(d.Features.Promote))
-	mux.Handle("POST /api/v1/admin/features/{id}/rollback", jsonStaff(d.Features.Rollback))
+	mux.Handle("PUT /api/v1/admin/features/{id}/draft", jsonSiteManager(d.Features.SaveDraft))
+	mux.Handle("POST /api/v1/admin/features/{id}/publish", jsonSiteManager(d.Features.Publish))
+	mux.Handle("POST /api/v1/admin/features/{id}/promote", jsonSiteManager(d.Features.Promote))
+	mux.Handle("POST /api/v1/admin/features/{id}/rollback", jsonSiteManager(d.Features.Rollback))
 
 	// Content entries.
+	mux.Handle("GET /api/v2/admin/features/{id}/settings", user(d.Content.GetSettings))
+	mux.Handle("POST /api/v2/admin/features/{id}/settings", jsonUser(d.Content.CreateSettings))
+	mux.Handle("PUT /api/v2/admin/features/{id}/entries/{entryId}/move", jsonUser(d.Content.Move))
 	mux.Handle("PUT /api/v2/admin/features/{id}/entries/order", jsonUser(d.Content.Reorder))
 	mux.Handle("GET /api/v1/admin/features/{id}/entries", user(d.Content.ListEntries))
 	mux.Handle("POST /api/v1/admin/features/{id}/entries", jsonUser(d.Content.Create))
@@ -147,34 +153,34 @@ func NewRouter(d Deps) http.Handler {
 	mux.Handle("GET /api/v1/admin/entries/{id}", user(d.Content.Get))
 	mux.Handle("PATCH /api/v1/admin/entries/{id}/draft", jsonUser(d.Content.SaveDraft))
 	mux.Handle("POST /api/v1/admin/entries/{id}/publish", jsonUser(d.Content.Publish))
-	mux.Handle("POST /api/v1/admin/entries/{id}/promote", jsonStaff(d.Content.Promote))
-	mux.Handle("POST /api/v1/admin/entries/{id}/rollback", jsonStaff(d.Content.Rollback))
-	mux.Handle("POST /api/v1/admin/entries/{id}/unpublish", jsonStaff(d.Content.Unpublish))
+	mux.Handle("POST /api/v1/admin/entries/{id}/promote", jsonSiteManager(d.Content.Promote))
+	mux.Handle("POST /api/v1/admin/entries/{id}/rollback", jsonUser(d.Content.Rollback))
+	mux.Handle("POST /api/v1/admin/entries/{id}/unpublish", jsonUser(d.Content.Unpublish))
 	mux.Handle("POST /api/v1/admin/entries/{id}/discard-draft", user(d.Content.DiscardDraft))
-	mux.Handle("POST /api/v1/admin/entries/{id}/archive", staff(d.Content.Archive))
+	mux.Handle("POST /api/v1/admin/entries/{id}/archive", user(d.Content.Archive))
 	mux.Handle("GET /api/v1/admin/entries/{id}/versions", user(d.Content.Versions))
 
 	// Site releases and environments.
 	if d.Releases != nil {
 		mux.Handle("GET /api/v1/admin/releases", user(d.Releases.List))
-		mux.Handle("POST /api/v1/admin/releases", staff(d.Releases.Import))
-		mux.Handle("POST /api/v1/admin/releases/{id}/activate", jsonUser(d.Releases.Activate))
-		mux.Handle("POST /api/v1/admin/releases/{id}/rollback", jsonUser(d.Releases.Rollback))
-		mux.Handle("GET /api/v1/admin/site/environments", user(d.Releases.Environments))
-		mux.Handle("PATCH /api/v1/admin/site/environments/{key}", jsonLimit(admin(d.Releases.UpdateEnvironment)))
-		mux.Handle("GET /api/v1/admin/release-sources", staff(d.Releases.Sources))
-		mux.Handle("POST /api/v1/admin/release-sources", jsonStaff(d.Releases.CreateSource))
-		mux.Handle("DELETE /api/v1/admin/release-sources/{id}", staff(d.Releases.DeleteSource))
-		mux.Handle("GET /api/v1/admin/release-sources/{id}/releases", staff(d.Releases.ListReleasesForSource))
-		mux.Handle("POST /api/v1/admin/release-sources/{id}/sync", jsonStaff(d.Releases.SyncSource))
+		mux.Handle("POST /api/v1/admin/releases", siteManager(d.Releases.Import))
+		mux.Handle("POST /api/v1/admin/releases/{id}/activate", jsonSiteManager(d.Releases.Activate))
+		mux.Handle("POST /api/v1/admin/releases/{id}/rollback", jsonSiteManager(d.Releases.Rollback))
+		mux.Handle("GET /api/v1/admin/site/environments", siteManager(d.Releases.Environments))
+		mux.Handle("PATCH /api/v1/admin/site/environments/{key}", jsonSiteManager(d.Releases.UpdateEnvironment))
+		mux.Handle("GET /api/v1/admin/release-sources", siteManager(d.Releases.Sources))
+		mux.Handle("POST /api/v1/admin/release-sources", jsonSiteManager(d.Releases.CreateSource))
+		mux.Handle("DELETE /api/v1/admin/release-sources/{id}", siteManager(d.Releases.DeleteSource))
+		mux.Handle("GET /api/v1/admin/release-sources/{id}/releases", siteManager(d.Releases.ListReleasesForSource))
+		mux.Handle("POST /api/v1/admin/release-sources/{id}/sync", jsonSiteManager(d.Releases.SyncSource))
 	}
 
 	// Form submissions.
 	mux.Handle("GET /api/v1/admin/forms/{key}/submissions", user(d.Forms.List))
 	mux.Handle("GET /api/v1/admin/forms/{key}/submissions/export", user(d.Forms.Export))
 	mux.Handle("GET /api/v1/admin/submissions/{id}", user(d.Forms.Get))
-	mux.Handle("PATCH /api/v1/admin/submissions/{id}/status", jsonStaff(d.Forms.UpdateStatus))
-	mux.Handle("POST /api/v1/admin/submissions/{id}/archive", staff(d.Forms.Archive))
+	mux.Handle("PATCH /api/v1/admin/submissions/{id}/status", jsonUser(d.Forms.UpdateStatus))
+	mux.Handle("POST /api/v1/admin/submissions/{id}/archive", user(d.Forms.Archive))
 	mux.Handle("DELETE /api/v1/admin/submissions/{id}", admin(d.Forms.Delete))
 
 	// Media administration and public redirect.
@@ -183,8 +189,8 @@ func NewRouter(d Deps) http.Handler {
 	mux.Handle("GET /api/v1/admin/media/{id}", user(d.Media.Get))
 	mux.Handle("PATCH /api/v1/admin/media/{id}", jsonUser(d.Media.Update))
 	mux.Handle("GET /api/v1/admin/media/{id}/usage", user(d.Media.Usage))
-	mux.Handle("POST /api/v1/admin/media/{id}/retry", staff(d.Media.Retry))
-	mux.Handle("DELETE /api/v1/admin/media/{id}", staff(d.Media.Delete))
+	mux.Handle("POST /api/v1/admin/media/{id}/retry", user(d.Media.Retry))
+	mux.Handle("DELETE /api/v1/admin/media/{id}", admin(d.Media.Delete))
 	mux.HandleFunc("GET /media/{key}", d.Media.Redirect)
 
 	// Public content and forms. CORS is opt-in per environment; the legacy

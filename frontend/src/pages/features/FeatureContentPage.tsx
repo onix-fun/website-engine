@@ -9,6 +9,8 @@ import { Link, Navigate, useSearchParams } from "react-router-dom";
 import {
   Archive,
   ArrowRight,
+  ArrowDown,
+  ArrowUp,
   ChevronDown,
   Eye,
   EyeOff,
@@ -20,10 +22,12 @@ import {
   Plus,
   RotateCcw,
   Search,
+  Settings2,
   X,
 } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "@/api";
+import { useAuth } from "@/app/auth";
 import type { EntryDetail, JsonObject } from "@/types";
 import { queryKeys } from "@/lib/query-keys";
 import { useDebouncedValue } from "@/hooks/use-debounced-value";
@@ -33,7 +37,6 @@ import { deriveEntrySubtitle, deriveEntryTitle } from "@/lib/json";
 import {
   EmptyState,
   ErrorState,
-  InlineAlert,
   TableSkeleton,
   useDocumentTitle,
 } from "@/components/common/page";
@@ -76,7 +79,7 @@ import {
 import { useFeatureContext } from "@/pages/features/FeatureLayout";
 
 type StateFilter = "all" | "published" | "draft" | "unpublished" | "archived";
-type SortOption = "updated_desc" | "updated_asc" | "created_desc" | "created_asc" | "title_asc";
+type SortOption = "updated_desc" | "updated_asc" | "created_desc" | "created_asc" | "title_asc" | "manual";
 
 const stateOptions: Array<{ value: StateFilter; label: string }> = [
   { value: "all", label: "Все записи" },
@@ -92,6 +95,7 @@ const sortOptions: Array<{ value: SortOption; label: string }> = [
   { value: "created_desc", label: "Сначала новые" },
   { value: "created_asc", label: "Сначала старые" },
   { value: "title_asc", label: "По названию А–Я" },
+  { value: "manual", label: "Вручную" },
 ];
 
 function entryData(entry: EntryDetail): JsonObject | null {
@@ -127,6 +131,8 @@ function useEntryFilterParams() {
 
 export default function FeatureContentPage() {
   const { feature } = useFeatureContext();
+  const { principal } = useAuth();
+  const canManageProd = principal?.role === "admin" || principal?.role === "moderator";
   const { state, sort, q, archived, update } = useEntryFilterParams();
   const queryClient = useQueryClient();
   const confirm = useConfirm();
@@ -152,17 +158,13 @@ export default function FeatureContentPage() {
   }, [debouncedSearch]);
 
   const schemaQuery = useQuery({
-    queryKey: queryKeys.features.draft(feature.id),
-    queryFn: ({ signal }) => api.features.draft(feature.id, signal),
+    queryKey: queryKeys.content.catalog,
+    queryFn: ({ signal }) => api.siteBuilder.contentFeatures(signal),
   });
+  const activeContentFeature = schemaQuery.data?.items.find((item) => item.id === feature.id);
   const fields = useMemo(
-    () =>
-      parsedSchema(
-        schemaQuery.data?.draft?.schema ??
-          schemaQuery.data?.dev?.schema ??
-          schemaQuery.data?.prod?.schema,
-      ).fields,
-    [schemaQuery.data],
+    () => parsedSchema(activeContentFeature?.schema).fields,
+    [activeContentFeature?.schema],
   );
   const blocksKey = useMemo(() => blocksKeyFromFields(fields), [fields]);
 
@@ -190,7 +192,8 @@ export default function FeatureContentPage() {
         {
           q,
           include_archived:
-            archived || state === "archived" || feature.type === "single",
+            archived || state === "archived" || feature.type === "single" || feature.type === "form",
+          sort: sort === "manual" ? "manual" : undefined,
           limit: 50,
           cursor: pageParam ?? undefined,
         },
@@ -224,6 +227,7 @@ export default function FeatureContentPage() {
       if (state === "archived" && entryState !== "archived") return false;
       return true;
     });
+    if (sort === "manual") return list;
     return [...list].sort((a, b) => {
       if (sort === "updated_asc") {
         return new Date(a.updated_at).getTime() - new Date(b.updated_at).getTime();
@@ -266,6 +270,15 @@ export default function FeatureContentPage() {
     });
     void queryClient.invalidateQueries({ queryKey: queryKeys.overview });
   };
+
+  const moveMutation = useMutation({
+    mutationFn: ({ entryId, direction }: { entryId: string; direction: "up" | "down" }) =>
+      api.entries.move(feature.id, entryId, direction),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.entries.list(feature.id) });
+    },
+    onError: (error) => toast.error(errorMessage(error)),
+  });
 
   const unpublishMutation = useMutation({
     mutationFn: (id: string) => api.entries.unpublish(id, "prod"),
@@ -372,7 +385,7 @@ export default function FeatureContentPage() {
     invalidate();
   };
 
-  const filtersActive = Boolean(q) || state !== "all" || sort !== "updated_desc" || archived;
+  const filtersActive = Boolean(q) || state !== "all" || archived;
 
   const resetFilters = () => {
     setSearchInput("");
@@ -405,7 +418,15 @@ export default function FeatureContentPage() {
 
   // A single feature owns exactly one record, so the table is replaced by the
   // editor itself.
-  if (feature.type === "single") {
+  if (schemaQuery.isLoading) return <Skeleton className="h-40 w-full" />;
+  if (schemaQuery.error) {
+    return <ErrorState error={schemaQuery.error} title="Не удалось загрузить схему контента" onRetry={() => void schemaQuery.refetch()} />;
+  }
+  if (!activeContentFeature) {
+    return <EmptyState icon={Layers} title="Фича не найдена в dev-снапшоте" description="Добавьте её в активный dev-снапшот, чтобы редактировать содержимое." />;
+  }
+
+  if (feature.type === "single" || feature.type === "form") {
     if (entriesQuery.isLoading) {
       return <Skeleton className="h-40 w-full" />;
     }
@@ -422,7 +443,9 @@ export default function FeatureContentPage() {
       <EmptyState
         icon={Layers}
         title="Запись ещё не создана"
-        description="Раздел типа «Одна запись» содержит один материал. Создайте его, чтобы открыть редактор."
+        description={feature.type === "form"
+          ? "Контент формы задаёт заголовки и подписи. Отправки посетителей доступны отдельно в разделе «Заявки»."
+          : "Раздел типа «Одна запись» содержит один материал. Создайте его, чтобы открыть редактор."}
         action={
           <Button asChild>
             <Link to={`/features/${feature.id}/content/new`}>
@@ -446,28 +469,32 @@ export default function FeatureContentPage() {
           </p>
         </div>
         <div className="flex shrink-0 flex-wrap items-center gap-2">
-          {feature.type !== "form" && (
-            <>
-              <input
-                ref={importInput}
-                type="file"
-                accept="application/json,.json"
-                className="sr-only"
-                aria-label="Импортировать записи из JSON"
-                onChange={(event) => void handleImportFile(event)}
-              />
-              <Button variant="outline" onClick={() => importInput.current?.click()} loading={importing}>
-                <FileUp />
-                Импорт JSON
-              </Button>
-              <Button asChild>
-                <Link to={`/features/${feature.id}/content/new`}>
-                  <Plus />
-                  Создать запись
-                </Link>
-              </Button>
-            </>
+          {activeContentFeature.settingsSchema && (
+            <Button variant="outline" asChild>
+              <Link to={`/features/${feature.id}/content/settings`}>
+                <Settings2 />
+                Тексты страницы
+              </Link>
+            </Button>
           )}
+          <input
+            ref={importInput}
+            type="file"
+            accept="application/json,.json"
+            className="sr-only"
+            aria-label="Импортировать записи из JSON"
+            onChange={(event) => void handleImportFile(event)}
+          />
+          <Button variant="outline" onClick={() => importInput.current?.click()} loading={importing}>
+            <FileUp />
+            Импорт JSON
+          </Button>
+          <Button asChild>
+            <Link to={`/features/${feature.id}/content/new`}>
+              <Plus />
+              Создать запись
+            </Link>
+          </Button>
         </div>
       </div>
 
@@ -518,7 +545,7 @@ export default function FeatureContentPage() {
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                {sortOptions.map((option) => (
+                {sortOptions.filter((option) => option.value !== "manual" || feature.type === "collection").map((option) => (
                   <SelectItem key={option.value} value={option.value}>
                     {option.label}
                   </SelectItem>
@@ -548,14 +575,16 @@ export default function FeatureContentPage() {
             Выбрано записей: <strong>{selected.length}</strong>
           </p>
           <div className="flex flex-wrap items-center gap-2">
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={() => void requestBulkUnpublish()}
-            >
-              <EyeOff />
-              Снять с публикации
-            </Button>
+            {canManageProd && (
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => void requestBulkUnpublish()}
+              >
+                <EyeOff />
+                Снять с публикации
+              </Button>
+            )}
             <Button
               size="sm"
               variant="outline"
@@ -664,7 +693,7 @@ export default function FeatureContentPage() {
                 </tr>
               </thead>
               <tbody>
-                {entries.map((entry) => {
+                {entries.map((entry, index) => {
                   const data = entryData(entry);
                   const title = deriveEntryTitle(data, fields);
                   const subtitle = deriveEntrySubtitle(data, fields, title);
@@ -717,6 +746,12 @@ export default function FeatureContentPage() {
                       </td>
                       <td>
                         <div className="flex items-center justify-end gap-1">
+                          {sort === "manual" && !q && state === "all" && !archived && (
+                            <>
+                              <Button variant="ghost" size="icon-sm" aria-label={`Поднять ${title}`} title="Поднять" disabled={index === 0 || moveMutation.isPending} onClick={() => moveMutation.mutate({ entryId: entry.id, direction: "up" })}><ArrowUp /></Button>
+                              <Button variant="ghost" size="icon-sm" aria-label={`Опустить ${title}`} title="Опустить" disabled={(index === entries.length - 1 && !entriesQuery.hasNextPage) || moveMutation.isPending} onClick={() => moveMutation.mutate({ entryId: entry.id, direction: "down" })}><ArrowDown /></Button>
+                            </>
+                          )}
                           <Button variant="ghost" size="sm" asChild>
                             <Link to={`/features/${feature.id}/content/${entry.id}`}>
                               <Pencil />
@@ -725,6 +760,7 @@ export default function FeatureContentPage() {
                           </Button>
                           <EntryActions
                             entry={entry}
+                            canManageProd={canManageProd}
                             onPreview={() => setPreviewEntry(entry)}
                             onCompare={() => setCompareEntry(entry)}
                             onUnpublish={() => void requestUnpublish(entry)}
@@ -740,7 +776,7 @@ export default function FeatureContentPage() {
           </div>
 
           <div className="grid gap-3 md:hidden">
-            {entries.map((entry) => {
+            {entries.map((entry, index) => {
               const data = entryData(entry);
               const title = deriveEntryTitle(data, fields);
               const subtitle = deriveEntrySubtitle(data, fields, title);
@@ -769,12 +805,19 @@ export default function FeatureContentPage() {
                     </div>
                     <EntryActions
                       entry={entry}
+                      canManageProd={canManageProd}
                       onPreview={() => setPreviewEntry(entry)}
                       onCompare={() => setCompareEntry(entry)}
                       onUnpublish={() => void requestUnpublish(entry)}
                       onArchive={() => void requestArchive(entry)}
                     />
                   </div>
+                  {sort === "manual" && !q && state === "all" && !archived && (
+                    <div className="mt-3 flex justify-end gap-1">
+                      <Button variant="outline" size="icon-sm" aria-label={`Поднять ${title}`} title="Поднять" disabled={index === 0 || moveMutation.isPending} onClick={() => moveMutation.mutate({ entryId: entry.id, direction: "up" })}><ArrowUp /></Button>
+                      <Button variant="outline" size="icon-sm" aria-label={`Опустить ${title}`} title="Опустить" disabled={(index === entries.length - 1 && !entriesQuery.hasNextPage) || moveMutation.isPending} onClick={() => moveMutation.mutate({ entryId: entry.id, direction: "down" })}><ArrowDown /></Button>
+                    </div>
+                  )}
                   <div className="mt-3 flex flex-wrap items-center justify-between gap-2 border-t border-border pt-3">
                     <EntryPublishStateBadge state={entryState} />
                     <span className="text-2xs text-muted-foreground">
@@ -806,13 +849,6 @@ export default function FeatureContentPage() {
             )}
           </div>
         </>
-      )}
-
-      {feature.type === "form" && (
-        <InlineAlert tone="info" title="Для формы используется раздел «Заявки»">
-          Записи раздела типа «Форма» создаются публичной формой. Отправки доступны в
-          разделе «Заявки».
-        </InlineAlert>
       )}
 
       <Dialog
@@ -906,12 +942,14 @@ export default function FeatureContentPage() {
 
 function EntryActions({
   entry,
+  canManageProd,
   onPreview,
   onCompare,
   onUnpublish,
   onArchive,
 }: {
   entry: EntryDetail;
+  canManageProd: boolean;
   onPreview: () => void;
   onCompare: () => void;
   onUnpublish: () => void;
@@ -944,7 +982,7 @@ function EntryActions({
         {state !== "archived" && (
           <>
             <DropdownMenuSeparator />
-            {entry.prod_version_id && (
+            {canManageProd && entry.prod_version_id && (
               <DropdownMenuItem
                 className="text-destructive focus:text-destructive"
                 onSelect={onUnpublish}

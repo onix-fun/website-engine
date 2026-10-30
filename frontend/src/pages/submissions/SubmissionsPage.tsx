@@ -19,6 +19,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "@/api";
+import { useAuth } from "@/app/auth";
 import type {
   JsonObject,
   JsonValue,
@@ -447,10 +448,6 @@ export default function SubmissionsPage() {
           action={
             formsQuery.isLoading ? (
               <Skeleton className="h-9 w-40" />
-            ) : forms.length === 0 ? (
-              <Button asChild variant="outline">
-                <Link to="/site">Загрузить form-сборку</Link>
-              </Button>
             ) : undefined
           }
         />
@@ -589,6 +586,8 @@ function SubmissionDetail({
   onBack: () => void;
   onChanged: () => void;
 }) {
+  const { principal } = useAuth();
+  const canDelete = principal?.role === "admin";
   const queryClient = useQueryClient();
   const confirm = useConfirm();
 
@@ -735,16 +734,18 @@ function SubmissionDetail({
             <Archive />
             В архив
           </Button>
-          <Button
-            variant="ghost"
-            size="sm"
-            className="text-destructive hover:text-destructive"
-            loading={removeMutation.isPending}
-            onClick={() => void requestRemove()}
-          >
-            <Trash2 />
-            Удалить
-          </Button>
+          {canDelete && (
+            <Button
+              variant="ghost"
+              size="sm"
+              className="text-destructive hover:text-destructive"
+              loading={removeMutation.isPending}
+              onClick={() => void requestRemove()}
+            >
+              <Trash2 />
+              Удалить
+            </Button>
+          )}
         </div>
       </div>
 

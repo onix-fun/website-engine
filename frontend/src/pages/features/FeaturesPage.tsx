@@ -429,7 +429,7 @@ export default function FeaturesPage() {
           description={
             filtersActive
               ? "По выбранным условиям ничего нет. Сбросьте фильтры или измените запрос."
-              : "Загрузите feature ZIP в разделе «Сайт». Новые контентные модели и формы появятся здесь автоматически из манифестов."
+              : "Контентные фичи появятся здесь после размещения в активном dev-снапшоте."
           }
           action={
             filtersActive ? (
@@ -437,14 +437,7 @@ export default function FeaturesPage() {
                 <RotateCcw />
                 Сбросить фильтры
               </Button>
-            ) : (
-              <Button asChild>
-                <Link to="/site">
-                  <Plus />
-                  Загрузить сборки фич
-                </Link>
-              </Button>
-            )
+            ) : undefined
           }
         />
       ) : features.length === 0 ? (

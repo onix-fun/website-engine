@@ -36,29 +36,49 @@ func (e *ConflictError) Unwrap() error { return ErrConflict }
 type Service struct {
 	repo        *Repository
 	featureRepo *features.Repository
+	schemas     SchemaProvider
+}
+
+type SchemaProvider interface {
+	ContentSchema(context.Context, environment.Environment, string) (uuid.UUID, string, json.RawMessage, error)
+}
+
+type SettingsSchemaProvider interface {
+	SettingsSchema(context.Context, environment.Environment, string) (uuid.UUID, string, json.RawMessage, error)
 }
 
 func NewService(repo *Repository, featureRepo *features.Repository) *Service {
 	return &Service{repo: repo, featureRepo: featureRepo}
 }
 
-func (s *Service) List(ctx context.Context, featureID uuid.UUID, includeArchived bool, search, rawCursor string, limit int) ([]Detail, string, error) {
+func (s *Service) SetSchemaProvider(provider SchemaProvider) {
+	s.schemas = provider
+}
+
+func (s *Service) List(ctx context.Context, featureID uuid.UUID, includeArchived bool, search, rawCursor string, limit int, manualOrder bool) ([]Detail, string, error) {
 	feature, err := s.featureRepo.GetByID(ctx, featureID)
 	if err != nil {
 		return nil, "", err
 	}
-	if feature.Type == "form" {
-		return nil, "", &ConflictError{Message: "У form-Feature нет контентных записей"}
+	if _, err := s.authoringSchema(ctx, s.repo.pool, feature); err != nil {
+		return nil, "", err
 	}
-	params := ListParams{FeatureID: featureID, Search: strings.TrimSpace(search), Limit: limit + 1, IncludeArchived: includeArchived}
+	if manualOrder && feature.Type != "collection" {
+		return nil, "", &ValidationError{Message: "Ручная сортировка доступна только для collection-фич"}
+	}
+	params := ListParams{FeatureID: featureID, Search: strings.TrimSpace(search), Limit: limit + 1, IncludeArchived: includeArchived, ExcludeSingleSlot: feature.Type == "collection", OrderBySort: manualOrder}
 	if rawCursor != "" {
 		cursor, ok := response.DecodeCursor(rawCursor)
 		if !ok {
 			return nil, "", &ValidationError{Message: "Некорректный cursor"}
 		}
+		if manualOrder && cursor.SortOrder == nil {
+			return nil, "", &ValidationError{Message: "Некорректный cursor ручной сортировки"}
+		}
 		id, _ := uuid.Parse(cursor.ID)
 		params.BeforeTime = &cursor.CreatedAt
 		params.BeforeID = &id
+		params.BeforeSortOrder = cursor.SortOrder
 	}
 	items, err := s.repo.List(ctx, s.repo.pool, params)
 	if err != nil {
@@ -68,13 +88,35 @@ func (s *Service) List(ctx context.Context, featureID uuid.UUID, includeArchived
 	if len(items) > limit {
 		items = items[:limit]
 		last := items[len(items)-1]
-		next = response.EncodeCursor(last.CreatedAt, last.ID)
+		if manualOrder {
+			next = response.EncodeOrderedCursor(last.SortOrder, last.CreatedAt, last.ID)
+		} else {
+			next = response.EncodeCursor(last.CreatedAt, last.ID)
+		}
 	}
 	return items, next, nil
 }
 
 func (s *Service) Get(ctx context.Context, id uuid.UUID) (Detail, error) {
 	return s.repo.GetDetail(ctx, s.repo.pool, id)
+}
+
+func (s *Service) GetSettings(ctx context.Context, featureID uuid.UUID) (Detail, error) {
+	feature, err := s.featureRepo.GetByID(ctx, featureID)
+	if err != nil {
+		return Detail{}, err
+	}
+	if feature.Type != "collection" {
+		return Detail{}, &ConflictError{Message: "Общие настройки доступны только для collection-фич"}
+	}
+	if _, err := s.authoringSettingsSchema(ctx, s.repo.pool, feature); err != nil {
+		return Detail{}, err
+	}
+	entry, err := s.repo.GetSingleSlotByFeature(ctx, s.repo.pool, featureID)
+	if err != nil {
+		return Detail{}, err
+	}
+	return s.repo.GetDetail(ctx, s.repo.pool, entry.ID)
 }
 
 func (s *Service) Versions(ctx context.Context, id uuid.UUID, limit int) ([]Version, error) {
@@ -102,9 +144,6 @@ func (s *Service) Create(ctx context.Context, actor principal.Principal, feature
 	if feature.Status == "archived" {
 		return Detail{}, &ConflictError{Message: "Нельзя добавлять записи в архивную Feature"}
 	}
-	if feature.Type == "form" {
-		return Detail{}, &ConflictError{Message: "Для form-Feature записи создаются через отправку формы"}
-	}
 	schemaVersion, err := s.authoringSchema(ctx, tx, feature)
 	if err != nil {
 		return Detail{}, err
@@ -116,7 +155,7 @@ func (s *Service) Create(ctx context.Context, actor principal.Principal, feature
 	entryID := uuid.New()
 	versionID := uuid.New()
 	entry := Entry{
-		ID: entryID, FeatureID: featureID, SingleSlot: feature.Type == "single",
+		ID: entryID, FeatureID: featureID, SingleSlot: feature.Type == "single" || feature.Type == "form",
 		DraftVersionID: &versionID, CreatedBy: &creator,
 	}
 	if err := s.repo.InsertEntry(ctx, tx, entry); err != nil {
@@ -127,6 +166,45 @@ func (s *Service) Create(ctx context.Context, actor principal.Principal, feature
 		Data: data, CreatedBy: &creator,
 	}
 	if err := s.repo.InsertVersion(ctx, tx, version); err != nil {
+		return Detail{}, translateDBError(err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return Detail{}, translateDBError(err)
+	}
+	return s.Get(ctx, entryID)
+}
+
+// CreateSettings creates the collection's single shared content object. The
+// unique single-slot index makes concurrent first saves safe.
+func (s *Service) CreateSettings(ctx context.Context, actor principal.Principal, featureID uuid.UUID, data json.RawMessage) (Detail, error) {
+	if err := validateDataObject(data); err != nil {
+		return Detail{}, err
+	}
+	tx, err := s.repo.Begin(ctx)
+	if err != nil {
+		return Detail{}, err
+	}
+	defer func() { _ = tx.Rollback(context.Background()) }()
+	feature, err := s.featureRepo.GetForUpdate(ctx, tx, featureID)
+	if err != nil {
+		return Detail{}, err
+	}
+	if feature.Type != "collection" {
+		return Detail{}, &ConflictError{Message: "Общие настройки доступны только для collection-фич"}
+	}
+	if feature.Status == "archived" {
+		return Detail{}, &ConflictError{Message: "Нельзя редактировать архивную Feature"}
+	}
+	schema, err := s.authoringSettingsSchema(ctx, tx, feature)
+	if err != nil {
+		return Detail{}, err
+	}
+	creator := actor.TokenID
+	entryID, versionID := uuid.New(), uuid.New()
+	if err := s.repo.InsertEntry(ctx, tx, Entry{ID: entryID, FeatureID: featureID, SingleSlot: true, DraftVersionID: &versionID, CreatedBy: &creator}); err != nil {
+		return Detail{}, translateDBError(err)
+	}
+	if err := s.repo.InsertVersion(ctx, tx, Version{ID: versionID, EntryID: entryID, Version: 1, SchemaVersionID: schema.ID, Data: data, CreatedBy: &creator}); err != nil {
 		return Detail{}, translateDBError(err)
 	}
 	if err := tx.Commit(ctx); err != nil {
@@ -167,13 +245,10 @@ func (s *Service) Import(ctx context.Context, actor principal.Principal, feature
 	if feature.Status == "archived" {
 		return nil, &ConflictError{Message: "Нельзя импортировать записи в архивную Feature"}
 	}
-	if feature.Type == "form" {
-		return nil, &ConflictError{Message: "Импорт записей для form-Feature недоступен"}
+	if (feature.Type == "single" || feature.Type == "form") && len(records) > 1 {
+		return nil, &ValidationError{Message: "У single/form Feature может быть только одна запись"}
 	}
-	if feature.Type == "single" && len(records) > 1 {
-		return nil, &ValidationError{Message: "У single-Feature может быть только одна запись"}
-	}
-	if feature.Type == "single" && entryID == nil {
+	if (feature.Type == "single" || feature.Type == "form") && entryID == nil {
 		var exists bool
 		if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM feature_entries WHERE feature_id=$1 AND single_slot=TRUE AND archived_at IS NULL)`, featureID).Scan(&exists); err != nil {
 			return nil, err
@@ -232,7 +307,7 @@ func (s *Service) Import(ctx context.Context, actor principal.Principal, feature
 	} else {
 		for _, data := range records {
 			id, versionID := uuid.New(), uuid.New()
-			entry := Entry{ID: id, FeatureID: featureID, SingleSlot: feature.Type == "single", DraftVersionID: &versionID, CreatedBy: &creator}
+			entry := Entry{ID: id, FeatureID: featureID, SingleSlot: feature.Type == "single" || feature.Type == "form", DraftVersionID: &versionID, CreatedBy: &creator}
 			if err := s.repo.InsertEntry(ctx, tx, entry); err != nil {
 				return nil, translateDBError(err)
 			}
@@ -287,7 +362,7 @@ func (s *Service) SaveDraft(ctx context.Context, actor principal.Principal, entr
 	if feature.Status == "archived" {
 		return Detail{}, &ConflictError{Message: "Feature находится в архиве"}
 	}
-	schemaVersion, err := s.authoringSchema(ctx, tx, feature)
+	schemaVersion, err := s.authoringSchemaForEntry(ctx, tx, feature, entry)
 	if err != nil {
 		return Detail{}, err
 	}
@@ -352,7 +427,7 @@ func (s *Service) Publish(ctx context.Context, actor principal.Principal, entryI
 	if err != nil {
 		return Detail{}, err
 	}
-	schema, err := s.envSchema(ctx, tx, feature, environment.Dev)
+	schema, err := s.envSchemaForEntry(ctx, tx, feature, entry, environment.Dev)
 	if err != nil {
 		return Detail{}, err
 	}
@@ -425,7 +500,7 @@ func (s *Service) Promote(ctx context.Context, actor principal.Principal, entryI
 	if err != nil {
 		return Detail{}, err
 	}
-	schema, err := s.envSchema(ctx, tx, feature, environment.Prod)
+	schema, err := s.envSchemaForEntry(ctx, tx, feature, entry, environment.Prod)
 	if err != nil {
 		return Detail{}, err
 	}
@@ -628,7 +703,7 @@ func (s *Service) Reorder(ctx context.Context, featureID uuid.UUID, entryIDs []u
 	if featureType != "collection" {
 		return &ValidationError{Message: "Изменять порядок можно только у коллекции"}
 	}
-	rows, err := tx.Query(ctx, `SELECT id FROM feature_entries WHERE feature_id=$1 AND archived_at IS NULL FOR UPDATE`, featureID)
+	rows, err := tx.Query(ctx, `SELECT id FROM feature_entries WHERE feature_id=$1 AND single_slot=FALSE AND archived_at IS NULL FOR UPDATE`, featureID)
 	if err != nil {
 		return err
 	}
@@ -667,7 +742,79 @@ func (s *Service) Reorder(ctx context.Context, featureID uuid.UUID, entryIDs []u
 	return nil
 }
 
+// Move swaps one active collection record with its adjacent item in the
+// persisted manual order. It works across paginated admin lists.
+func (s *Service) Move(ctx context.Context, featureID, entryID uuid.UUID, direction string) error {
+	if direction != "up" && direction != "down" {
+		return &ValidationError{Message: "direction должен быть up или down"}
+	}
+	tx, err := s.repo.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback(context.Background()) }()
+	var featureType string
+	if err := tx.QueryRow(ctx, `SELECT type FROM features WHERE id=$1 AND status='active' FOR UPDATE`, featureID).Scan(&featureType); err != nil {
+		return translateDBError(err)
+	}
+	if featureType != "collection" {
+		return &ValidationError{Message: "Изменять порядок можно только у коллекции"}
+	}
+	rows, err := tx.Query(ctx, `SELECT id FROM feature_entries WHERE feature_id=$1 AND single_slot=FALSE AND archived_at IS NULL ORDER BY sort_order,created_at,id FOR UPDATE`, featureID)
+	if err != nil {
+		return err
+	}
+	ids := make([]uuid.UUID, 0)
+	for rows.Next() {
+		var id uuid.UUID
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
+			return err
+		}
+		ids = append(ids, id)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return err
+	}
+	rows.Close()
+	index := -1
+	for i, id := range ids {
+		if id == entryID {
+			index = i
+			break
+		}
+	}
+	if index < 0 {
+		return ErrNotFound
+	}
+	other := index - 1
+	if direction == "down" {
+		other = index + 1
+	}
+	if other < 0 || other >= len(ids) {
+		return nil
+	}
+	ids[index], ids[other] = ids[other], ids[index]
+	for order, id := range ids {
+		if _, err := tx.Exec(ctx, `UPDATE feature_entries SET sort_order=$3,revision=revision+1,updated_at=now() WHERE id=$1 AND feature_id=$2`, id, featureID, order); err != nil {
+			return translateDBError(err)
+		}
+	}
+	return translateDBError(tx.Commit(ctx))
+}
+
 func (s *Service) authoringSchema(ctx context.Context, db DBTX, feature features.Feature) (features.Version, error) {
+	if s.schemas != nil {
+		id, mode, schema, err := s.schemas.ContentSchema(ctx, environment.Dev, feature.Key)
+		if err != nil {
+			return features.Version{}, &ConflictError{Message: "Feature не размещена в активном dev-снапшоте или схема недоступна: " + err.Error()}
+		}
+		if mode != feature.Type {
+			return features.Version{}, &ConflictError{Message: "Режим Feature не совпадает с активным dev-снапшотом"}
+		}
+		return features.Version{ID: id, FeatureID: feature.ID, Schema: schema, Status: "published"}, nil
+	}
 	id := feature.DraftVersionID
 	if id == nil {
 		id = feature.DevVersionID
@@ -686,6 +833,16 @@ func (s *Service) authoringSchema(ctx context.Context, db DBTX, feature features
 }
 
 func (s *Service) envSchema(ctx context.Context, db DBTX, feature features.Feature, env environment.Environment) (features.Version, error) {
+	if s.schemas != nil {
+		id, mode, schema, err := s.schemas.ContentSchema(ctx, env, feature.Key)
+		if err != nil {
+			return features.Version{}, &ConflictError{Message: "Feature не размещена в активном " + env.String() + "-снапшоте или схема недоступна: " + err.Error()}
+		}
+		if mode != feature.Type {
+			return features.Version{}, &ConflictError{Message: "Режим Feature не совпадает с активным " + env.String() + "-снапшотом"}
+		}
+		return features.Version{ID: id, FeatureID: feature.ID, Schema: schema, Status: "published"}, nil
+	}
 	id := feature.DevVersionID
 	if env == environment.Prod {
 		id = feature.ProdVersionID
@@ -698,6 +855,50 @@ func (s *Service) envSchema(ctx context.Context, db DBTX, feature features.Featu
 		return features.Version{}, err
 	}
 	return version, nil
+}
+
+func (s *Service) authoringSchemaForEntry(ctx context.Context, db DBTX, feature features.Feature, entry Entry) (features.Version, error) {
+	if feature.Type == "collection" && entry.SingleSlot {
+		return s.authoringSettingsSchema(ctx, db, feature)
+	}
+	return s.authoringSchema(ctx, db, feature)
+}
+
+func (s *Service) envSchemaForEntry(ctx context.Context, db DBTX, feature features.Feature, entry Entry, env environment.Environment) (features.Version, error) {
+	if feature.Type == "collection" && entry.SingleSlot {
+		return s.envSettingsSchema(ctx, db, feature, env)
+	}
+	return s.envSchema(ctx, db, feature, env)
+}
+
+func (s *Service) authoringSettingsSchema(ctx context.Context, _ DBTX, feature features.Feature) (features.Version, error) {
+	provider, ok := s.schemas.(SettingsSchemaProvider)
+	if !ok {
+		return features.Version{}, &ConflictError{Message: "У collection-фичи не объявлена схема общих настроек"}
+	}
+	id, mode, schema, err := provider.SettingsSchema(ctx, environment.Dev, feature.Key)
+	if err != nil {
+		return features.Version{}, &ConflictError{Message: "Общие настройки не размещены в активном dev-снапшоте: " + err.Error()}
+	}
+	if mode != feature.Type {
+		return features.Version{}, &ConflictError{Message: "Режим Feature не совпадает с активным dev-снапшотом"}
+	}
+	return features.Version{ID: id, FeatureID: feature.ID, Schema: schema, Status: "published"}, nil
+}
+
+func (s *Service) envSettingsSchema(ctx context.Context, _ DBTX, feature features.Feature, env environment.Environment) (features.Version, error) {
+	provider, ok := s.schemas.(SettingsSchemaProvider)
+	if !ok {
+		return features.Version{}, &ConflictError{Message: "У collection-фичи не объявлена схема общих настроек"}
+	}
+	id, mode, schema, err := provider.SettingsSchema(ctx, env, feature.Key)
+	if err != nil {
+		return features.Version{}, &ConflictError{Message: "Общие настройки не размещены в активном " + env.String() + "-снапшоте: " + err.Error()}
+	}
+	if mode != feature.Type {
+		return features.Version{}, &ConflictError{Message: "Режим Feature не совпадает с активным " + env.String() + "-снапшотом"}
+	}
+	return features.Version{ID: id, FeatureID: feature.ID, Schema: schema, Status: "published"}, nil
 }
 
 func (s *Service) validateDataVersion(_ context.Context, _ DBTX, schema, data json.RawMessage) error {

@@ -41,13 +41,15 @@ type SnapshotRecord struct {
 }
 
 type PinnedBuild struct {
-	Key             string                 `json:"key"`
-	Name            string                 `json:"name"`
-	Version         string                 `json:"version"`
-	SchemaVersionID uuid.UUID              `json:"schemaVersionId"`
-	Digest          string                 `json:"digest"`
-	Manifest        json.RawMessage        `json:"manifest"`
-	Assets          map[string]PinnedAsset `json:"assets"`
+	Key                       string                 `json:"key"`
+	Name                      string                 `json:"name"`
+	Version                   string                 `json:"version"`
+	SchemaVersionID           uuid.UUID              `json:"schemaVersionId"`
+	SettingsSchemaVersionID   *uuid.UUID             `json:"settingsSchemaVersionId,omitempty"`
+	SubmissionSchemaVersionID *uuid.UUID             `json:"submissionSchemaVersionId,omitempty"`
+	Digest                    string                 `json:"digest"`
+	Manifest                  json.RawMessage        `json:"manifest"`
+	Assets                    map[string]PinnedAsset `json:"assets"`
 }
 
 type PinnedAsset struct {
@@ -100,6 +102,20 @@ type CollectionPage struct {
 	Items      []SnapshotContent `json:"items"`
 	NextOffset int               `json:"nextOffset,omitempty"`
 	Total      int               `json:"total"`
+}
+
+// ContentFeature describes an editable feature from the active dev snapshot.
+// It deliberately exposes the schema shipped with the pinned build rather
+// than a mutable feature draft.
+type ContentFeature struct {
+	ID         uuid.UUID       `json:"id"`
+	Key        string          `json:"key"`
+	Name       string          `json:"name"`
+	Mode       string          `json:"mode"`
+	Version    string          `json:"version"`
+	Schema     json.RawMessage `json:"schema"`
+	Settings   json.RawMessage `json:"settingsSchema,omitempty"`
+	Submission json.RawMessage `json:"submissionSchema,omitempty"`
 }
 
 type SnapshotService struct {
@@ -188,7 +204,7 @@ func (s *SnapshotService) Publish(ctx context.Context, actor uuid.UUID, name str
 	if err != nil {
 		return SnapshotRecord{}, err
 	}
-	content, err := s.captureContent(ctx, tx, cfg, builds)
+	content, err := s.captureContent(ctx, tx, builds)
 	if err != nil {
 		return SnapshotRecord{}, fmt.Errorf("%w: %v", ErrInvalid, err)
 	}
@@ -200,10 +216,7 @@ func (s *SnapshotService) Publish(ctx context.Context, actor uuid.UUID, name str
 	if err != nil {
 		return SnapshotRecord{}, err
 	}
-	checksumInput, err := json.Marshal(struct {
-		Payload SnapshotPayload   `json:"payload"`
-		Content []SnapshotContent `json:"content"`
-	}{payload, content})
+	checksumInput, err := json.Marshal(payload)
 	if err != nil {
 		return SnapshotRecord{}, err
 	}
@@ -240,11 +253,6 @@ func (s *SnapshotService) Publish(ctx context.Context, actor uuid.UUID, name str
 	err = tx.QueryRow(ctx, `INSERT INTO site_snapshots (id,name,digest,payload,created_by) VALUES ($1,$2,$3,$4::jsonb,$5) RETURNING sequence,created_at`, record.ID, name, digest, string(payloadJSON), actor).Scan(&record.Sequence, &record.CreatedAt)
 	if err != nil {
 		return SnapshotRecord{}, err
-	}
-	for _, item := range content {
-		if _, err := tx.Exec(ctx, `INSERT INTO site_snapshot_content (snapshot_id,feature_key,entry_id,version_id,sort_order,data) VALUES ($1,$2,$3,$4,$5,$6::jsonb)`, record.ID, item.FeatureKey, item.EntryID, item.VersionID, item.SortOrder, string(item.Data)); err != nil {
-			return SnapshotRecord{}, err
-		}
 	}
 	tag, err := tx.Exec(ctx, `UPDATE site_environments SET active_snapshot_id=$1,revision=revision+1,updated_at=now() WHERE key='dev'`, record.ID)
 	if err != nil {
@@ -389,20 +397,31 @@ func (s *SnapshotService) Runtime(ctx context.Context, env environment.Environme
 			var argumentMap map[string]json.RawMessage
 			_ = json.Unmarshal(arguments, &argumentMap)
 			lookupValue := scalarJSON(argumentMap[placement.CollectionSource.Argument])
-			entry, err := s.findSnapshotRecord(ctx, record.ID, placement.CollectionSource.FeatureKey, placement.CollectionSource.Field, lookupValue)
+			entry, err := s.findEnvironmentRecord(ctx, env, placement.CollectionSource.FeatureKey, placement.CollectionSource.Field, lookupValue)
 			if err != nil {
 				return RuntimeComposition{}, err
 			}
 			content = entry.Data
-		} else if info.Manifest.Content.Mode == "single" {
+		} else if info.Manifest.Content.Mode == "single" || info.Manifest.Content.Mode == "form" {
 			var data []byte
-			err := s.pool.QueryRow(ctx, `SELECT data FROM site_snapshot_content WHERE snapshot_id=$1 AND feature_key=$2 ORDER BY sort_order,entry_id LIMIT 1`, record.ID, info.Manifest.Key).Scan(&data)
+			column := environmentContentColumn(env)
+			err := s.pool.QueryRow(ctx, `SELECT v.data FROM features f JOIN feature_entries e ON e.feature_id=f.id JOIN feature_entry_versions v ON v.id=e.`+column+` WHERE f.key=$1 AND e.single_slot=TRUE AND e.archived_at IS NULL ORDER BY e.created_at,e.id LIMIT 1`, info.Manifest.Key).Scan(&data)
 			if err == nil {
 				content = data
 			} else if !errors.Is(err, pgx.ErrNoRows) {
 				return RuntimeComposition{}, err
 			}
 		} else if info.Manifest.Content.Mode == "collection" {
+			if len(info.Manifest.Content.SettingsSchema) > 0 {
+				var data []byte
+				column := environmentContentColumn(env)
+				err := s.pool.QueryRow(ctx, `SELECT v.data FROM features f JOIN feature_entries e ON e.feature_id=f.id JOIN feature_entry_versions v ON v.id=e.`+column+` WHERE f.key=$1 AND e.single_slot=TRUE AND e.archived_at IS NULL ORDER BY e.created_at,e.id LIMIT 1`, info.Manifest.Key).Scan(&data)
+				if err == nil {
+					content = data
+				} else if !errors.Is(err, pgx.ErrNoRows) {
+					return RuntimeComposition{}, err
+				}
+			}
 			collection = "/api/v2/content/" + info.Manifest.Key + "/records"
 		}
 		styleURLs := make([]string, 0, len(info.Manifest.Styles))
@@ -423,7 +442,7 @@ func (s *SnapshotService) Runtime(ctx context.Context, env environment.Environme
 }
 
 func (s *SnapshotService) Collection(ctx context.Context, env environment.Environment, key, field, value string, offset, limit int) (CollectionPage, error) {
-	record, payload, err := s.Active(ctx, env)
+	_, payload, err := s.Active(ctx, env)
 	if err != nil {
 		return CollectionPage{}, err
 	}
@@ -453,11 +472,12 @@ func (s *SnapshotService) Collection(ctx context.Context, env environment.Enviro
 	if offset < 0 {
 		offset = 0
 	}
+	column := environmentContentColumn(env)
 	var total int
-	if err := s.pool.QueryRow(ctx, `SELECT count(*) FROM site_snapshot_content WHERE snapshot_id=$1 AND feature_key=$2 AND ($3='' OR data->>$3=$4)`, record.ID, key, field, value).Scan(&total); err != nil {
+	if err := s.pool.QueryRow(ctx, `SELECT count(*) FROM features f JOIN feature_entries e ON e.feature_id=f.id JOIN feature_entry_versions v ON v.id=e.`+column+` WHERE f.key=$1 AND e.single_slot=FALSE AND e.archived_at IS NULL AND ($2='' OR v.data->>$2=$3)`, key, field, value).Scan(&total); err != nil {
 		return CollectionPage{}, err
 	}
-	rows, err := s.pool.Query(ctx, `SELECT entry_id,version_id,sort_order,data FROM site_snapshot_content WHERE snapshot_id=$1 AND feature_key=$2 AND ($3='' OR data->>$3=$4) ORDER BY sort_order,entry_id OFFSET $5 LIMIT $6`, record.ID, key, field, value, offset, limit)
+	rows, err := s.pool.Query(ctx, `SELECT e.id,v.id,e.sort_order,v.version,v.data FROM features f JOIN feature_entries e ON e.feature_id=f.id JOIN feature_entry_versions v ON v.id=e.`+column+` WHERE f.key=$1 AND e.single_slot=FALSE AND e.archived_at IS NULL AND ($2='' OR v.data->>$2=$3) ORDER BY e.sort_order,e.created_at,e.id OFFSET $4 LIMIT $5`, key, field, value, offset, limit)
 	if err != nil {
 		return CollectionPage{}, err
 	}
@@ -467,7 +487,7 @@ func (s *SnapshotService) Collection(ctx context.Context, env environment.Enviro
 		var item SnapshotContent
 		item.FeatureKey = key
 		var raw []byte
-		if err := rows.Scan(&item.EntryID, &item.VersionID, &item.SortOrder, &raw); err != nil {
+		if err := rows.Scan(&item.EntryID, &item.VersionID, &item.SortOrder, &item.Version, &raw); err != nil {
 			return CollectionPage{}, err
 		}
 		item.Data = raw
@@ -498,13 +518,93 @@ func (s *SnapshotService) FormSchema(ctx context.Context, env environment.Enviro
 		if manifest.Content.Mode != "form" {
 			return uuid.Nil, nil, ErrNotFound
 		}
+		if submissionSchema := manifest.SubmissionSchema(); len(submissionSchema) > 0 {
+			if build.SubmissionSchemaVersionID == nil {
+				return uuid.Nil, nil, fmt.Errorf("form feature %q has no pinned submission schema version", key)
+			}
+			return *build.SubmissionSchemaVersionID, submissionSchema, nil
+		}
 		return build.SchemaVersionID, manifest.Content.Schema, nil
 	}
 	return uuid.Nil, nil, ErrNotFound
 }
 
-func (s *SnapshotService) findSnapshotRecord(ctx context.Context, snapshotID uuid.UUID, key, field, value string) (SnapshotContent, error) {
-	rows, err := s.pool.Query(ctx, `SELECT entry_id,version_id,sort_order,data FROM site_snapshot_content WHERE snapshot_id=$1 AND feature_key=$2 AND data->>$3=$4 ORDER BY sort_order,entry_id LIMIT 2`, snapshotID, key, field, value)
+// ContentSchema returns the editor schema pinned by the active site snapshot.
+// It makes content authoring follow the version that is actually composed on
+// the site, even if newer feature builds have been uploaded but not promoted.
+func (s *SnapshotService) ContentSchema(ctx context.Context, env environment.Environment, key string) (uuid.UUID, string, json.RawMessage, error) {
+	_, payload, err := s.Active(ctx, env)
+	if err != nil {
+		return uuid.Nil, "", nil, err
+	}
+	for _, build := range payload.Builds {
+		if build.Key != key {
+			continue
+		}
+		var manifest Manifest
+		if err := json.Unmarshal(build.Manifest, &manifest); err != nil {
+			return uuid.Nil, "", nil, err
+		}
+		return build.SchemaVersionID, manifest.Content.Mode, manifest.Content.Schema, nil
+	}
+	return uuid.Nil, "", nil, ErrNotFound
+}
+
+// SettingsSchema returns collection-level editorial settings pinned by an
+// active site snapshot. It is separate from the per-record collection schema.
+func (s *SnapshotService) SettingsSchema(ctx context.Context, env environment.Environment, key string) (uuid.UUID, string, json.RawMessage, error) {
+	_, payload, err := s.Active(ctx, env)
+	if err != nil {
+		return uuid.Nil, "", nil, err
+	}
+	for _, build := range payload.Builds {
+		if build.Key != key {
+			continue
+		}
+		var manifest Manifest
+		if err := json.Unmarshal(build.Manifest, &manifest); err != nil {
+			return uuid.Nil, "", nil, err
+		}
+		if len(manifest.Content.SettingsSchema) == 0 || build.SettingsSchemaVersionID == nil {
+			return uuid.Nil, "", nil, ErrNotFound
+		}
+		return *build.SettingsSchemaVersionID, manifest.Content.Mode, manifest.Content.SettingsSchema, nil
+	}
+	return uuid.Nil, "", nil, ErrNotFound
+}
+
+// ContentCatalog lists only features pinned by the active dev site snapshot.
+func (s *SnapshotService) ContentCatalog(ctx context.Context) ([]ContentFeature, error) {
+	_, payload, err := s.Active(ctx, environment.Dev)
+	if err != nil {
+		return nil, err
+	}
+	items := make([]ContentFeature, 0, len(payload.Builds))
+	for _, build := range payload.Builds {
+		var manifest Manifest
+		if err := json.Unmarshal(build.Manifest, &manifest); err != nil {
+			return nil, err
+		}
+		var id uuid.UUID
+		if err := s.pool.QueryRow(ctx, `SELECT id FROM features WHERE key=$1 AND status='active'`, build.Key).Scan(&id); err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				continue
+			}
+			return nil, err
+		}
+		item := ContentFeature{ID: id, Key: build.Key, Name: build.Name, Mode: manifest.Content.Mode, Version: build.Version, Schema: manifest.Content.Schema, Settings: manifest.Content.SettingsSchema}
+		if submissionSchema := manifest.SubmissionSchema(); len(submissionSchema) > 0 {
+			item.Submission = submissionSchema
+		}
+		items = append(items, item)
+	}
+	sort.Slice(items, func(i, j int) bool { return items[i].Name < items[j].Name })
+	return items, nil
+}
+
+func (s *SnapshotService) findEnvironmentRecord(ctx context.Context, env environment.Environment, key, field, value string) (SnapshotContent, error) {
+	column := environmentContentColumn(env)
+	rows, err := s.pool.Query(ctx, `SELECT e.id,v.id,e.sort_order,v.version,v.data FROM features f JOIN feature_entries e ON e.feature_id=f.id JOIN feature_entry_versions v ON v.id=e.`+column+` WHERE f.key=$1 AND e.single_slot=FALSE AND e.archived_at IS NULL AND ($2='' OR v.data->>$2=$3) ORDER BY e.sort_order,e.created_at,e.id LIMIT 2`, key, field, value)
 	if err != nil {
 		return SnapshotContent{}, err
 	}
@@ -514,7 +614,7 @@ func (s *SnapshotService) findSnapshotRecord(ctx context.Context, snapshotID uui
 		var item SnapshotContent
 		var raw []byte
 		item.FeatureKey = key
-		if err := rows.Scan(&item.EntryID, &item.VersionID, &item.SortOrder, &raw); err != nil {
+		if err := rows.Scan(&item.EntryID, &item.VersionID, &item.SortOrder, &item.Version, &raw); err != nil {
 			return SnapshotContent{}, err
 		}
 		item.Data = raw
@@ -581,22 +681,43 @@ func (s *SnapshotService) pinnedBuilds(ctx context.Context, cfg SiteConfig) ([]P
 		for name, a := range record.Assets {
 			assets[name] = PinnedAsset{ContentType: a.ContentType, Size: a.Size, SHA256: a.SHA256}
 		}
-		out = append(out, PinnedBuild{Key: record.Key, Name: record.Name, Version: record.Version, SchemaVersionID: record.SchemaVersionID, Digest: record.Digest, Manifest: manifestJSON, Assets: assets})
+		out = append(out, PinnedBuild{Key: record.Key, Name: record.Name, Version: record.Version, SchemaVersionID: record.SchemaVersionID, SettingsSchemaVersionID: record.SettingsSchemaVersionID, SubmissionSchemaVersionID: record.SubmissionSchemaVersionID, Digest: record.Digest, Manifest: manifestJSON, Assets: assets})
 	}
 	return out, nil
 }
 
-func (s *SnapshotService) captureContent(ctx context.Context, tx pgx.Tx, cfg SiteConfig, builds []PinnedBuild) ([]SnapshotContent, error) {
+func (s *SnapshotService) captureContent(ctx context.Context, tx pgx.Tx, builds []PinnedBuild) ([]SnapshotContent, error) {
 	var all []SnapshotContent
 	for _, build := range builds {
 		var manifest Manifest
 		if err := json.Unmarshal(build.Manifest, &manifest); err != nil {
 			return nil, err
 		}
-		if manifest.Content.Mode == "form" {
-			continue
+		singleSlot := manifest.Content.Mode == "single" || manifest.Content.Mode == "form"
+		if manifest.Content.Mode == "collection" && len(manifest.Content.SettingsSchema) > 0 {
+			var settingsCount int
+			if err := tx.QueryRow(ctx, `SELECT count(*) FROM features f JOIN feature_entries e ON e.feature_id=f.id JOIN feature_entry_versions v ON v.id=e.dev_version_id WHERE f.key=$1 AND f.status='active' AND e.archived_at IS NULL AND e.dev_version_id IS NOT NULL AND e.single_slot=TRUE`, build.Key).Scan(&settingsCount); err != nil {
+				return nil, err
+			}
+			if settingsCount > 1 {
+				return nil, fmt.Errorf("collection feature %q has more than one published settings entry", build.Key)
+			}
+			var settings []byte
+			err := tx.QueryRow(ctx, `SELECT v.data FROM features f JOIN feature_entries e ON e.feature_id=f.id JOIN feature_entry_versions v ON v.id=e.dev_version_id WHERE f.key=$1 AND f.status='active' AND e.archived_at IS NULL AND e.dev_version_id IS NOT NULL AND e.single_slot=TRUE LIMIT 1`, build.Key).Scan(&settings)
+			if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+				return nil, err
+			}
+			if err == nil {
+				fieldErrors, err := validate.Validate(manifest.Content.SettingsSchema, settings)
+				if err != nil {
+					return nil, err
+				}
+				if len(fieldErrors) > 0 {
+					return nil, fmt.Errorf("collection feature %q settings are incompatible with build %s: %s", build.Key, build.Version, fieldErrors[0].Message)
+				}
+			}
 		}
-		rows, err := tx.Query(ctx, `SELECT e.id,e.sort_order,v.id,v.version,v.data FROM features f JOIN feature_entries e ON e.feature_id=f.id JOIN feature_entry_versions v ON v.id=e.dev_version_id WHERE f.key=$1 AND f.status='active' AND e.archived_at IS NULL AND e.dev_version_id IS NOT NULL ORDER BY e.sort_order,e.created_at,e.id`, build.Key)
+		rows, err := tx.Query(ctx, `SELECT e.id,e.sort_order,v.id,v.version,v.data FROM features f JOIN feature_entries e ON e.feature_id=f.id JOIN feature_entry_versions v ON v.id=e.dev_version_id WHERE f.key=$1 AND f.status='active' AND e.archived_at IS NULL AND e.dev_version_id IS NOT NULL AND e.single_slot=$2 ORDER BY e.sort_order,e.created_at,e.id`, build.Key, singleSlot)
 		if err != nil {
 			return nil, err
 		}
@@ -626,7 +747,7 @@ func (s *SnapshotService) captureContent(ctx context.Context, tx pgx.Tx, cfg Sit
 			return nil, err
 		}
 		rows.Close()
-		if manifest.Content.Mode == "single" && len(featureContent) > 1 {
+		if singleSlot && len(featureContent) > 1 {
 			return nil, fmt.Errorf("single feature %q has more than one published content entry", build.Key)
 		}
 		all = append(all, featureContent...)
@@ -720,6 +841,15 @@ func scalarJSON(value json.RawMessage) string {
 	default:
 		return strings.TrimSpace(string(value))
 	}
+}
+
+// The environment name is an enum controlled by the listener, so using the
+// corresponding fixed column here is safe and keeps the query parameterized.
+func environmentContentColumn(env environment.Environment) string {
+	if env == environment.Prod {
+		return "prod_version_id"
+	}
+	return "dev_version_id"
 }
 
 type buildRegistry struct{ items map[string]BuildInfo }

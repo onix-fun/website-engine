@@ -117,10 +117,16 @@ func WriteDecodeError(w http.ResponseWriter, r *http.Request, err error) bool {
 type Cursor struct {
 	CreatedAt time.Time `json:"t"`
 	ID        string    `json:"i"`
+	SortOrder *int64    `json:"o,omitempty"`
 }
 
 func EncodeCursor(createdAt time.Time, id uuid.UUID) string {
 	raw, _ := json.Marshal(Cursor{CreatedAt: createdAt.UTC(), ID: id.String()})
+	return base64.RawURLEncoding.EncodeToString(raw)
+}
+
+func EncodeOrderedCursor(sortOrder int64, createdAt time.Time, id uuid.UUID) string {
+	raw, _ := json.Marshal(Cursor{CreatedAt: createdAt.UTC(), ID: id.String(), SortOrder: &sortOrder})
 	return base64.RawURLEncoding.EncodeToString(raw)
 }
 

@@ -39,11 +39,33 @@ type Manifest struct {
 	Slots         []string        `json:"slots"`
 	Arguments     json.RawMessage `json:"arguments"`
 	Content       ContentContract `json:"content"`
+	Form          *FormContract   `json:"form,omitempty"`
 }
 
 type ContentContract struct {
-	Mode   string          `json:"mode"`
-	Schema json.RawMessage `json:"schema"`
+	Mode           string          `json:"mode"`
+	Schema         json.RawMessage `json:"schema"`
+	SettingsSchema json.RawMessage `json:"settingsSchema,omitempty"`
+	// Form is accepted for builds created by an earlier engine draft. New
+	// manifests declare the submission schema at the top-level form property.
+	Form *FormContract `json:"form,omitempty"`
+}
+
+// FormContract keeps editable form presentation content separate from the
+// schema used to validate public submissions. Older manifests omit this
+// block; their content.schema remains the submission schema.
+type FormContract struct {
+	SubmissionSchema json.RawMessage `json:"submissionSchema"`
+}
+
+func (m Manifest) SubmissionSchema() json.RawMessage {
+	if m.Form != nil {
+		return m.Form.SubmissionSchema
+	}
+	if m.Content.Form != nil {
+		return m.Content.Form.SubmissionSchema
+	}
+	return nil
 }
 
 // ParseManifest decodes and validates a developer-authored feature manifest.
@@ -127,6 +149,39 @@ func (m Manifest) Validate() error {
 	}
 	if err := validateObjectSchema(m.Content.Schema, "content.schema"); err != nil {
 		return err
+	}
+	if len(m.Content.SettingsSchema) > 0 {
+		if m.Content.Mode != "collection" {
+			return errors.New("content.settingsSchema is only valid when content.mode is collection")
+		}
+		if err := validateObjectSchema(m.Content.SettingsSchema, "content.settingsSchema"); err != nil {
+			return err
+		}
+	}
+	if m.Content.Form != nil {
+		if m.Content.Mode != "form" {
+			return errors.New("content.form is only valid when content.mode is form")
+		}
+		if m.Form != nil {
+			return errors.New("declare form.submissionSchema in one place only")
+		}
+		if len(m.Content.Form.SubmissionSchema) == 0 {
+			return errors.New("content.form.submissionSchema is required")
+		}
+		if err := validateObjectSchema(m.Content.Form.SubmissionSchema, "content.form.submissionSchema"); err != nil {
+			return err
+		}
+	}
+	if m.Form != nil {
+		if m.Content.Mode != "form" {
+			return errors.New("form is only valid when content.mode is form")
+		}
+		if len(m.Form.SubmissionSchema) == 0 {
+			return errors.New("form.submissionSchema is required")
+		}
+		if err := validateObjectSchema(m.Form.SubmissionSchema, "form.submissionSchema"); err != nil {
+			return err
+		}
 	}
 	return nil
 }

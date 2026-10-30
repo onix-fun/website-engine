@@ -4,6 +4,7 @@ import {
   Braces,
   Calendar,
   CalendarClock,
+  File as FileIcon,
   Hash,
   Image,
   List,
@@ -36,6 +37,7 @@ export const FIELD_TYPES: FieldTypeMeta[] = [
   { value: "object", label: "Объект", group: "Структуры", hint: "Вложенные поля", icon: Braces },
   { value: "array", label: "Массив", group: "Структуры", hint: "Повторяющиеся значения", icon: ListTree },
   { value: "media", label: "Медиа", group: "Медиа", hint: "ID файла медиатеки, format: media", icon: Image },
+  { value: "file", label: "Файл", group: "Медиа", hint: "ID изображения, видео, SVG или PDF, format: file", icon: FileIcon },
 ];
 
 export const ARRAY_ITEM_TYPES: Array<{ value: ArrayItemType; label: string }> = [
@@ -46,6 +48,7 @@ export const ARRAY_ITEM_TYPES: Array<{ value: ArrayItemType; label: string }> = 
   { value: "enum", label: "Enum" },
   { value: "object", label: "Объект" },
   { value: "media", label: "Медиа" },
+  { value: "file", label: "Файл" },
 ];
 
 export function fieldTypeMeta(value: BuilderFieldType): FieldTypeMeta {

@@ -14,6 +14,7 @@ interface AutosaveOptions {
   revision: number;
   data: JsonObject;
   enabled: boolean;
+  createEntry?: (featureId: string, data: JsonObject) => Promise<EntryDetail>;
   onCreated: (entry: EntryDetail) => void;
   onSaved: (entry: EntryDetail) => void;
 }
@@ -46,6 +47,7 @@ export function useContentAutosave({
   revision,
   data,
   enabled,
+  createEntry = api.entries.create,
   onCreated,
   onSaved,
 }: AutosaveOptions): AutosaveResult {
@@ -170,7 +172,7 @@ export function useContentAutosave({
       try {
         let entry: EntryDetail;
         if (!currentEntryId) {
-          entry = await api.entries.create(featureId, payload);
+          entry = await createEntry(featureId, payload);
           entryIdRef.current = entry.id;
           revisionRef.current = entry.revision;
           setCurrentEntryId(entry.id);
@@ -211,7 +213,7 @@ export function useContentAutosave({
     } finally {
       savingRef.current = null;
     }
-  }, [featureId, setBaseline]);
+  }, [createEntry, featureId, setBaseline]);
 
   const save = useCallback(
     async (manual = false): Promise<boolean> => {

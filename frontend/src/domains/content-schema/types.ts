@@ -11,6 +11,7 @@ export type BuilderFieldType =
   | "object"
   | "array"
   | "media"
+  | "file"
   | "blocks";
 
 export type ArrayItemType =
@@ -20,7 +21,8 @@ export type ArrayItemType =
   | "boolean"
   | "enum"
   | "object"
-  | "media";
+  | "media"
+  | "file";
 
 export type BlockTypeName =
   | "paragraph"

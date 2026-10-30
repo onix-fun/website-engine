@@ -80,12 +80,14 @@ export function truncate(value: string, max = 80): string {
 export const roleLabels: Record<Role, string> = {
   admin: "Администратор",
   moderator: "Модератор",
+  staff: "Контент-редактор",
   user: "Пользователь",
 };
 
 export const roleShortLabels: Record<Role, string> = {
   admin: "Админ",
   moderator: "Модератор",
+  staff: "Редактор",
   user: "Пользователь",
 };
 
@@ -127,8 +129,9 @@ export const submissionStatusLabels: Record<SubmissionStatus, string> = {
 
 export const tokenRoleHints: Record<Role, string> = {
   admin: "Полный доступ, включая удаление заявок и управление всеми токенами",
-  moderator: "Контент, медиа и заявки; может создавать только пользовательские токены",
-  user: "Может войти, но не имеет доступа к администрированию",
+  moderator: "Настройки сайта, контент, медиа и заявки; создаёт только пользовательские токены",
+  staff: "Контент, файлы и заявки; без управления настройками сайта",
+  user: "Контент, файлы и заявки; без управления настройками сайта",
 };
 
 export function formatPercent(value: number): string {

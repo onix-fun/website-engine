@@ -12,9 +12,10 @@ import NotFoundPage, { RouteErrorPage } from "@/app/pages/NotFoundPage";
 import { LoadingPage } from "@/components/common/page";
 
 const DashboardPage = lazy(() => import("@/pages/dashboard/DashboardPage"));
-const FeaturesPage = lazy(() => import("@/pages/features/FeaturesPage"));
+const ContentHomePage = lazy(() => import("@/pages/content/ContentHomePage"));
 const FeatureLayout = lazy(() => import("@/pages/features/FeatureLayout"));
 const FeatureContentPage = lazy(() => import("@/pages/features/FeatureContentPage"));
+const FeatureSettingsPage = lazy(() => import("@/pages/features/FeatureSettingsPage"));
 const ContentEditorPage = lazy(() => import("@/pages/features/ContentEditorPage"));
 const SubmissionsPage = lazy(() => import("@/pages/submissions/SubmissionsPage"));
 const MediaPage = lazy(() => import("@/pages/media/MediaPage"));
@@ -72,10 +73,10 @@ function RequireAuth() {
   return <Outlet />;
 }
 
-function RequireStaff({ children }: { children?: React.ReactNode }) {
+function RequireSiteManager({ children }: { children?: React.ReactNode }) {
   const auth = useAuth();
   if (!auth.principal) return <LoadingPage />;
-  if (auth.principal.role === "user") return <NoAccessScreen />;
+  if (auth.principal.role !== "admin" && auth.principal.role !== "moderator") return <NoAccessScreen />;
   // Rendering children instead of an Outlet keeps the parent route's outlet
   // context intact (useOutletContext inside children must still see it).
   if (children) return <>{children}</>;
@@ -98,8 +99,8 @@ export const router = createBrowserRouter(
           element: <AppShell />,
           children: [
             { index: true, element: <DashboardPage /> },
-            { path: "features", element: <FeaturesPage /> },
-            { path: "features/new", element: <Navigate to="/site" replace /> },
+            { path: "content", element: <ContentHomePage /> },
+            { path: "features/new", element: <NotFoundPage /> },
             {
               path: "features/:featureId",
               element: <FeatureLayout />,
@@ -109,6 +110,7 @@ export const router = createBrowserRouter(
                 { path: "settings", element: <Navigate to="../content" replace /> },
                 { path: "content", element: <FeatureContentPage /> },
                 { path: "content/new", element: <ContentEditorPage /> },
+                { path: "content/settings", element: <FeatureSettingsPage /> },
                 { path: "content/:entryId", element: <ContentEditorPage /> },
               ],
             },
@@ -116,11 +118,11 @@ export const router = createBrowserRouter(
             { path: "submissions/:submissionId", element: <SubmissionsPage /> },
             { path: "media", element: <MediaPage /> },
             {
-              element: <RequireStaff />,
+              element: <RequireSiteManager />,
               children: [{ path: "site", element: <SiteBuilderPage /> }],
             },
             {
-              element: <RequireStaff />,
+              element: <RequireSiteManager />,
               children: [{
               path: "access",
               element: <AccessLayout />,
@@ -133,11 +135,11 @@ export const router = createBrowserRouter(
             }],
             },
             {
-              element: <RequireStaff />,
+              element: <RequireSiteManager />,
               children: [{ path: "settings", element: <SettingsPage /> }],
             },
             {
-              element: <RequireStaff />,
+              element: <RequireSiteManager />,
               children: [{ path: "settings/environments/:envKey", element: <EnvironmentSettingsPage /> }],
             },
             { path: "*", element: <NotFoundPage /> },

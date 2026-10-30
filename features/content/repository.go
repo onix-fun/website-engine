@@ -30,6 +30,7 @@ type Entry struct {
 	ID             uuid.UUID  `json:"id"`
 	FeatureID      uuid.UUID  `json:"feature_id"`
 	SingleSlot     bool       `json:"single_slot"`
+	SortOrder      int64      `json:"sort_order"`
 	Revision       int64      `json:"revision"`
 	DraftVersionID *uuid.UUID `json:"draft_version_id"`
 	DevVersionID   *uuid.UUID `json:"dev_version_id"`
@@ -75,8 +76,11 @@ type ListParams struct {
 	Search          string
 	BeforeTime      *time.Time
 	BeforeID        *uuid.UUID
+	BeforeSortOrder *int64
 	Limit           int
 	IncludeArchived bool
+	ExcludeSingleSlot bool
+	OrderBySort     bool
 }
 
 type Repository struct {
@@ -114,16 +118,20 @@ func (r *Repository) GetForUpdate(ctx context.Context, db DBTX, id uuid.UUID) (E
 	return scanEntry(db.QueryRow(ctx, selectEntry+` WHERE e.id = $1 FOR UPDATE`, id))
 }
 
+func (r *Repository) GetSingleSlotByFeature(ctx context.Context, db DBTX, featureID uuid.UUID) (Entry, error) {
+	return scanEntry(db.QueryRow(ctx, selectEntry+` WHERE e.feature_id = $1 AND e.single_slot = TRUE AND e.archived_at IS NULL ORDER BY e.created_at,e.id LIMIT 1`, featureID))
+}
+
 func (r *Repository) GetDetail(ctx context.Context, db DBTX, id uuid.UUID) (Detail, error) {
 	var d Detail
 	err := db.QueryRow(ctx, `
-		SELECT e.id, e.feature_id, e.single_slot, e.revision, e.draft_version_id,
+		SELECT e.id, e.feature_id, e.single_slot, e.sort_order, e.revision, e.draft_version_id,
 		       e.dev_version_id, e.prod_version_id, e.created_by, e.created_at, e.updated_at,
 		       e.archived_at, f.key, f.type
 		  FROM feature_entries e
 		  JOIN features f ON f.id = e.feature_id
 		 WHERE e.id = $1`, id,
-	).Scan(&d.ID, &d.FeatureID, &d.SingleSlot, &d.Revision, &d.DraftVersionID,
+	).Scan(&d.ID, &d.FeatureID, &d.SingleSlot, &d.SortOrder, &d.Revision, &d.DraftVersionID,
 		&d.DevVersionID, &d.ProdVersionID, &d.CreatedBy, &d.CreatedAt, &d.UpdatedAt,
 		&d.ArchivedAt, &d.FeatureKey, &d.FeatureType)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -157,8 +165,14 @@ func (r *Repository) GetDetail(ctx context.Context, db DBTX, id uuid.UUID) (Deta
 }
 
 func (r *Repository) List(ctx context.Context, db DBTX, p ListParams) ([]Detail, error) {
-	rows, err := db.Query(ctx, `
-		SELECT e.id, e.feature_id, e.single_slot, e.revision, e.draft_version_id,
+	pageCondition := `AND ($4::timestamptz IS NULL OR (e.created_at, e.id) < ($4, $5)) AND ($8::bigint IS NULL)`
+	orderBy := `e.created_at DESC, e.id DESC`
+	if p.OrderBySort {
+		pageCondition = `AND ($8::bigint IS NULL OR (e.sort_order, e.created_at, e.id) > ($8, $4, $5))`
+		orderBy = `e.sort_order, e.created_at, e.id`
+	}
+	query := `
+		SELECT e.id, e.feature_id, e.single_slot, e.sort_order, e.revision, e.draft_version_id,
 		       e.dev_version_id, e.prod_version_id, e.created_by, e.created_at, e.updated_at,
 		       e.archived_at, f.key, f.type
 		  FROM feature_entries e
@@ -166,11 +180,13 @@ func (r *Repository) List(ctx context.Context, db DBTX, p ListParams) ([]Detail,
 		  LEFT JOIN feature_entry_versions v ON v.id = COALESCE(e.draft_version_id, e.dev_version_id, e.prod_version_id)
 		 WHERE e.feature_id = $1
 		   AND ($2 OR e.archived_at IS NULL)
+		   AND (NOT $7 OR e.single_slot = FALSE)
 		   AND ($3 = '' OR v.data::text ILIKE '%' || $3 || '%')
-		   AND ($4::timestamptz IS NULL OR (e.created_at, e.id) < ($4, $5))
-		 ORDER BY e.created_at DESC, e.id DESC
-		 LIMIT $6`,
-		p.FeatureID, p.IncludeArchived, p.Search, p.BeforeTime, p.BeforeID, p.Limit,
+		 ` + pageCondition + `
+		 ORDER BY ` + orderBy + `
+		 LIMIT $6`
+	rows, err := db.Query(ctx, query,
+		p.FeatureID, p.IncludeArchived, p.Search, p.BeforeTime, p.BeforeID, p.Limit, p.ExcludeSingleSlot, p.BeforeSortOrder,
 	)
 	if err != nil {
 		return nil, err
@@ -180,7 +196,7 @@ func (r *Repository) List(ctx context.Context, db DBTX, p ListParams) ([]Detail,
 	out := make([]Detail, 0, p.Limit)
 	for rows.Next() {
 		var d Detail
-		if err := rows.Scan(&d.ID, &d.FeatureID, &d.SingleSlot, &d.Revision, &d.DraftVersionID,
+		if err := rows.Scan(&d.ID, &d.FeatureID, &d.SingleSlot, &d.SortOrder, &d.Revision, &d.DraftVersionID,
 			&d.DevVersionID, &d.ProdVersionID, &d.CreatedBy, &d.CreatedAt, &d.UpdatedAt,
 			&d.ArchivedAt, &d.FeatureKey, &d.FeatureType); err != nil {
 			return nil, err
@@ -440,7 +456,7 @@ func (r *Repository) CountPublished(ctx context.Context, db DBTX, env environmen
 }
 
 const selectEntry = `
-	SELECT e.id, e.feature_id, e.single_slot, e.revision, e.draft_version_id,
+	SELECT e.id, e.feature_id, e.single_slot, e.sort_order, e.revision, e.draft_version_id,
 	       e.dev_version_id, e.prod_version_id, e.created_by, e.created_at, e.updated_at, e.archived_at
 	  FROM feature_entries e`
 
@@ -454,7 +470,7 @@ type rowScanner interface {
 
 func scanEntry(row rowScanner) (Entry, error) {
 	var e Entry
-	err := row.Scan(&e.ID, &e.FeatureID, &e.SingleSlot, &e.Revision, &e.DraftVersionID,
+	err := row.Scan(&e.ID, &e.FeatureID, &e.SingleSlot, &e.SortOrder, &e.Revision, &e.DraftVersionID,
 		&e.DevVersionID, &e.ProdVersionID, &e.CreatedBy, &e.CreatedAt, &e.UpdatedAt, &e.ArchivedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return Entry{}, ErrNotFound

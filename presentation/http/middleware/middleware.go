@@ -195,6 +195,21 @@ func RequireStaff(next http.Handler) http.Handler {
 	})
 }
 
+func RequireSiteManager(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		p, ok := PrincipalFrom(r.Context())
+		if !ok {
+			response.Error(w, r, http.StatusUnauthorized, "unauthorized", "Требуется авторизация")
+			return
+		}
+		if !auth.IsSiteManager(p.Role) {
+			response.Error(w, r, http.StatusForbidden, "forbidden", "Недостаточно прав")
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
 func RequireAdmin(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		p, ok := PrincipalFrom(r.Context())

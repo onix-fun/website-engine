@@ -50,3 +50,34 @@ func TestParseManifestRejectsUnsafeOrUnknownContract(t *testing.T) {
 		})
 	}
 }
+
+func TestParseManifestSupportsCollectionSettingsAndFormSubmissionSchema(t *testing.T) {
+	collection := strings.Replace(string(validManifest()), `"single"`, `"collection"`, 1)
+	collection = strings.Replace(collection, `"content":{"mode":"collection","schema":`, `"content":{"mode":"collection","settingsSchema":{"type":"object","properties":{"title":{"type":"string"}},"additionalProperties":false},"schema":`, 1)
+	if _, err := ParseManifest([]byte(collection)); err != nil {
+		t.Fatalf("collection settings schema should be accepted: %v", err)
+	}
+
+	form := strings.Replace(string(validManifest()), `"single"`, `"form"`, 1)
+	form = strings.Replace(form, `"content":`, `"form":{"submissionSchema":{"type":"object","properties":{"email":{"type":"string","format":"email"}},"required":["email"],"additionalProperties":false}},"content":`, 1)
+	if manifest, err := ParseManifest([]byte(form)); err != nil || len(manifest.SubmissionSchema()) == 0 {
+		t.Fatalf("form submission schema should be accepted: %v", err)
+	}
+	legacySubmission := strings.Replace(string(validManifest()), `"single"`, `"form"`, 1)
+	legacySubmission = strings.Replace(legacySubmission, `"content":{"mode":"form","schema":`, `"content":{"mode":"form","form":{"submissionSchema":{"type":"object","properties":{"email":{"type":"string","format":"email"}},"required":["email"],"additionalProperties":false}},"schema":`, 1)
+	if manifest, err := ParseManifest([]byte(legacySubmission)); err != nil || len(manifest.SubmissionSchema()) == 0 {
+		t.Fatalf("manifest from the earlier nested form contract should remain readable: %v", err)
+	}
+
+	legacyForm := strings.Replace(string(validManifest()), `"single"`, `"form"`, 1)
+	if manifest, err := ParseManifest([]byte(legacyForm)); err != nil || manifest.Form != nil {
+		t.Fatalf("legacy form manifest without form.submissionSchema should remain valid: manifest=%#v err=%v", manifest, err)
+	}
+}
+
+func TestParseManifestRejectsMisplacedCollectionSettingsSchema(t *testing.T) {
+	raw := strings.Replace(string(validManifest()), `"content":{"mode":"single","schema":`, `"content":{"mode":"single","settingsSchema":{"type":"object","properties":{}},"schema":`, 1)
+	if _, err := ParseManifest([]byte(raw)); err == nil {
+		t.Fatal("settingsSchema must be rejected for non-collection features")
+	}
+}

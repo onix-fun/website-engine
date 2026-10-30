@@ -26,17 +26,19 @@ type AssetRecord struct {
 }
 
 type BuildRecord struct {
-	ID              uuid.UUID              `json:"id"`
-	FeatureID       uuid.UUID              `json:"featureId"`
-	Key             string                 `json:"key"`
-	Name            string                 `json:"name"`
-	Version         string                 `json:"version"`
-	SchemaVersionID uuid.UUID              `json:"schemaVersionId"`
-	Digest          string                 `json:"digest"`
-	ArtifactSize    int64                  `json:"artifactSize"`
-	Manifest        json.RawMessage        `json:"manifest"`
-	Assets          map[string]AssetRecord `json:"assets"`
-	CreatedAt       time.Time              `json:"createdAt"`
+	ID                        uuid.UUID              `json:"id"`
+	FeatureID                 uuid.UUID              `json:"featureId"`
+	Key                       string                 `json:"key"`
+	Name                      string                 `json:"name"`
+	Version                   string                 `json:"version"`
+	SchemaVersionID           uuid.UUID              `json:"schemaVersionId"`
+	SettingsSchemaVersionID   *uuid.UUID             `json:"settingsSchemaVersionId,omitempty"`
+	SubmissionSchemaVersionID *uuid.UUID             `json:"submissionSchemaVersionId,omitempty"`
+	Digest                    string                 `json:"digest"`
+	ArtifactSize              int64                  `json:"artifactSize"`
+	Manifest                  json.RawMessage        `json:"manifest"`
+	Assets                    map[string]AssetRecord `json:"assets"`
+	CreatedAt                 time.Time              `json:"createdAt"`
 }
 
 type BuildService struct {
@@ -93,8 +95,8 @@ func (s *BuildService) Import(ctx context.Context, actor uuid.UUID, body []byte)
 
 	var existing BuildRecord
 	var existingManifest, existingAssets []byte
-	err = tx.QueryRow(ctx, `SELECT id, digest, schema_version_id, artifact_size, manifest, assets, created_at FROM feature_builds WHERE feature_id=$1 AND version=$2`, featureID, archive.Manifest.Version).
-		Scan(&existing.ID, &existing.Digest, &existing.SchemaVersionID, &existing.ArtifactSize, &existingManifest, &existingAssets, &existing.CreatedAt)
+	err = tx.QueryRow(ctx, `SELECT id, digest, schema_version_id, settings_schema_version_id, submission_schema_version_id, artifact_size, manifest, assets, created_at FROM feature_builds WHERE feature_id=$1 AND version=$2`, featureID, archive.Manifest.Version).
+		Scan(&existing.ID, &existing.Digest, &existing.SchemaVersionID, &existing.SettingsSchemaVersionID, &existing.SubmissionSchemaVersionID, &existing.ArtifactSize, &existingManifest, &existingAssets, &existing.CreatedAt)
 	if err == nil {
 		if existing.Digest != archive.Digest {
 			return BuildRecord{}, false, fmt.Errorf("feature version %s@%s is immutable and already has a different digest", archive.Manifest.Key, archive.Manifest.Version)
@@ -123,6 +125,29 @@ func (s *BuildService) Import(ctx context.Context, actor uuid.UUID, body []byte)
 		schemaVersionID, featureID, schemaVersion, string(archive.Manifest.Content.Schema), actor, now); err != nil {
 		return BuildRecord{}, false, fmt.Errorf("register manifest content schema: %w", err)
 	}
+	var settingsSchemaVersionID *uuid.UUID
+	if len(archive.Manifest.Content.SettingsSchema) > 0 {
+		id := uuid.New()
+		settingsSchemaVersionID = &id
+		settingsVersion := schemaVersion + 1
+		if _, err := tx.Exec(ctx, `INSERT INTO feature_versions (id,feature_id,version,schema,status,created_by,created_at,published_at) VALUES ($1,$2,$3,$4::jsonb,'published',$5,$6,$6)`,
+			id, featureID, settingsVersion, string(archive.Manifest.Content.SettingsSchema), actor, now); err != nil {
+			return BuildRecord{}, false, fmt.Errorf("register manifest collection settings schema: %w", err)
+		}
+	}
+	var submissionSchemaVersionID *uuid.UUID
+	if submissionSchema := archive.Manifest.SubmissionSchema(); len(submissionSchema) > 0 {
+		id := uuid.New()
+		submissionSchemaVersionID = &id
+		submissionVersion := schemaVersion + 1
+		if settingsSchemaVersionID != nil {
+			submissionVersion++
+		}
+		if _, err := tx.Exec(ctx, `INSERT INTO feature_versions (id,feature_id,version,schema,status,created_by,created_at,published_at) VALUES ($1,$2,$3,$4::jsonb,'published',$5,$6,$6)`,
+			id, featureID, submissionVersion, string(submissionSchema), actor, now); err != nil {
+			return BuildRecord{}, false, fmt.Errorf("register manifest form submission schema: %w", err)
+		}
+	}
 	if _, err := tx.Exec(ctx, `UPDATE features SET name=$2,type=$3,dev_version_id=$4,draft_version_id=NULL,revision=revision+1,updated_at=now() WHERE id=$1`,
 		featureID, archive.Manifest.Name, archive.Manifest.Content.Mode, schemaVersionID); err != nil {
 		return BuildRecord{}, false, err
@@ -137,20 +162,20 @@ func (s *BuildService) Import(ctx context.Context, actor uuid.UUID, body []byte)
 	}
 	buildID := uuid.New()
 	var createdAt time.Time
-	err = tx.QueryRow(ctx, `INSERT INTO feature_builds (id,feature_id,version,schema_version_id,digest,artifact_size,manifest,assets,created_by) VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb,$8::jsonb,$9) RETURNING created_at`,
-		buildID, featureID, archive.Manifest.Version, schemaVersionID, archive.Digest, archive.Size, string(manifestJSON), string(assetsJSON), actor).Scan(&createdAt)
+	err = tx.QueryRow(ctx, `INSERT INTO feature_builds (id,feature_id,version,schema_version_id,settings_schema_version_id,submission_schema_version_id,digest,artifact_size,manifest,assets,created_by) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb,$10::jsonb,$11) RETURNING created_at`,
+		buildID, featureID, archive.Manifest.Version, schemaVersionID, settingsSchemaVersionID, submissionSchemaVersionID, archive.Digest, archive.Size, string(manifestJSON), string(assetsJSON), actor).Scan(&createdAt)
 	if err != nil {
 		return BuildRecord{}, false, err
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return BuildRecord{}, false, err
 	}
-	return BuildRecord{ID: buildID, FeatureID: featureID, Key: archive.Manifest.Key, Name: archive.Manifest.Name, Version: archive.Manifest.Version, SchemaVersionID: schemaVersionID,
+	return BuildRecord{ID: buildID, FeatureID: featureID, Key: archive.Manifest.Key, Name: archive.Manifest.Name, Version: archive.Manifest.Version, SchemaVersionID: schemaVersionID, SettingsSchemaVersionID: settingsSchemaVersionID, SubmissionSchemaVersionID: submissionSchemaVersionID,
 		Digest: archive.Digest, ArtifactSize: archive.Size, Manifest: manifestJSON, Assets: assets, CreatedAt: createdAt}, true, nil
 }
 
 func (s *BuildService) List(ctx context.Context) ([]BuildRecord, error) {
-	rows, err := s.pool.Query(ctx, `SELECT b.id,b.feature_id,f.key,f.name,b.version,b.schema_version_id,b.digest,b.artifact_size,b.manifest,b.assets,b.created_at
+	rows, err := s.pool.Query(ctx, `SELECT b.id,b.feature_id,f.key,f.name,b.version,b.schema_version_id,b.settings_schema_version_id,b.submission_schema_version_id,b.digest,b.artifact_size,b.manifest,b.assets,b.created_at
 		FROM feature_builds b JOIN features f ON f.id=b.feature_id ORDER BY f.key,b.created_at DESC`)
 	if err != nil {
 		return nil, err
@@ -162,7 +187,7 @@ func (s *BuildService) List(ctx context.Context) ([]BuildRecord, error) {
 	for rows.Next() {
 		var item BuildRecord
 		var manifest, assets []byte
-		if err := rows.Scan(&item.ID, &item.FeatureID, &item.Key, &item.Name, &item.Version, &item.SchemaVersionID, &item.Digest, &item.ArtifactSize, &manifest, &assets, &item.CreatedAt); err != nil {
+		if err := rows.Scan(&item.ID, &item.FeatureID, &item.Key, &item.Name, &item.Version, &item.SchemaVersionID, &item.SettingsSchemaVersionID, &item.SubmissionSchemaVersionID, &item.Digest, &item.ArtifactSize, &manifest, &assets, &item.CreatedAt); err != nil {
 			return nil, err
 		}
 		item.Manifest = manifest
@@ -186,10 +211,10 @@ func (s *BuildService) List(ctx context.Context) ([]BuildRecord, error) {
 func (s *BuildService) Build(ctx context.Context, key, version string) (BuildRecord, bool, error) {
 	var item BuildRecord
 	var manifest, assets []byte
-	err := s.pool.QueryRow(ctx, `SELECT b.id,b.feature_id,f.key,f.name,b.version,b.schema_version_id,b.digest,b.artifact_size,b.manifest,b.assets,b.created_at
+	err := s.pool.QueryRow(ctx, `SELECT b.id,b.feature_id,f.key,f.name,b.version,b.schema_version_id,b.settings_schema_version_id,b.submission_schema_version_id,b.digest,b.artifact_size,b.manifest,b.assets,b.created_at
 		FROM feature_builds b JOIN features f ON f.id=b.feature_id WHERE f.key=$1 AND ($2='' OR b.version=$2)
 		ORDER BY b.created_at DESC LIMIT 1`, key, version).
-		Scan(&item.ID, &item.FeatureID, &item.Key, &item.Name, &item.Version, &item.SchemaVersionID, &item.Digest, &item.ArtifactSize, &manifest, &assets, &item.CreatedAt)
+		Scan(&item.ID, &item.FeatureID, &item.Key, &item.Name, &item.Version, &item.SchemaVersionID, &item.SettingsSchemaVersionID, &item.SubmissionSchemaVersionID, &item.Digest, &item.ArtifactSize, &manifest, &assets, &item.CreatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return BuildRecord{}, false, nil
 	}
