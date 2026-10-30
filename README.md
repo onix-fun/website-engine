@@ -20,9 +20,9 @@ docker compose up -d --no-build
 
 ## Сборка и выпуск образа
 
-Workflow [engine-image.yml](.github/workflows/engine-image.yml) запускает проверки на pull request и push в `main`. Публикация в GHCR запускается после публикации GitHub Release с SemVer-тегом вида `v1.2.3`; workflow публикует версии `1.2.3`, `1.2` и `latest` для стабильного релиза. Имя образа формируется из `GITHUB_REPOSITORY`: `ghcr.io/<owner>/<repository>`.
+Workflow [engine-image.yml](.github/workflows/engine-image.yml) запускает проверки на pull request и push в `main`. Публикация в GHCR запускается при push SemVer-тега (`v1.2.3`) или публикации GitHub Release. Workflow публикует версии `1.2.3`, `1.2` и `latest` для стабильного релиза. Имя образа формируется из `GITHUB_REPOSITORY`: `ghcr.io/<owner>/<repository>`.
 
-Чтобы обновить локальный движок до конкретного релиза, укажите его тег в `ENGINE_IMAGE` в `.env`, затем выполните `make compose-up`. Команда сначала получает образ из registry и запускает Compose без локальной сборки. Чтобы разрешить скачивание без входа в GHCR, после первой публикации сделайте package публичным в настройках GitHub Packages.
+Чтобы выпустить версию, создайте SemVer-тег (`git tag v1.2.3 && git push origin v1.2.3`) либо опубликуйте GitHub Release с таким тегом. Чтобы обновить локальный движок до конкретного релиза, укажите его тег в `ENGINE_IMAGE` в `.env`, затем выполните `make compose-up`. Команда сначала получает образ из registry и запускает Compose без локальной сборки. Чтобы разрешить скачивание без входа в GHCR, после первой публикации сделайте package публичным в настройках GitHub Packages.
 
 ## Как собирается сайт
 
