@@ -133,7 +133,7 @@ export function useContentAutosave({
       setCurrentEntryId(nextEntryId);
       setCurrentRevision(nextRevision);
       setStatus("saved");
-      setLastSavedAt(new Date());
+      setLastSavedAt(null);
       setError(null);
       setConflict(null);
     },

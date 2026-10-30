@@ -142,10 +142,12 @@ function SaveStateBadge({
   status,
   dirty,
   hasSavedDraft,
+  hasPublished,
 }: {
   status: string;
   dirty: boolean;
   hasSavedDraft: boolean;
+  hasPublished: boolean;
 }) {
   if (status === "saving") {
     return (
@@ -183,6 +185,11 @@ function SaveStateBadge({
     <Badge variant="success">
       <Check className="h-3 w-3" aria-hidden="true" />
       Сохранено
+    </Badge>
+  ) : hasPublished ? (
+    <Badge variant="success">
+      <Check className="h-3 w-3" aria-hidden="true" />
+      Опубликовано
     </Badge>
   ) : (
     <Badge variant="muted">Черновик отсутствует</Badge>
@@ -765,7 +772,8 @@ export default function ContentEditorPage() {
               <SaveStateBadge
                 status={autosave.status}
                 dirty={dirty}
-                hasSavedDraft={Boolean(entry?.draft || autosave.lastSavedAt)}
+                hasSavedDraft={hasDraft}
+                hasPublished={Boolean(entry?.dev || entry?.prod)}
               />
               {entry?.dev && (
                 <Badge variant="secondary">dev v{entry.dev.version}</Badge>
@@ -781,11 +789,17 @@ export default function ContentEditorPage() {
               {entry?.archived_at && <Badge variant="muted">В архиве</Badge>}
             </div>
             <p className="mt-1 text-2xs text-muted-foreground">
-              {autosave.lastSavedAt
-                ? `Черновик сохранён ${formatDateTime(
-                    autosave.lastSavedAt.toISOString(),
-                  )}`
-                : "Черновик ещё не сохранялся на сервере"}
+              {dirty
+                ? "Есть несохранённые изменения"
+                : hasDraft
+                  ? autosave.lastSavedAt
+                    ? `Черновик сохранён ${formatDateTime(
+                        autosave.lastSavedAt.toISOString(),
+                      )}`
+                    : "Черновик сохранён на сервере"
+                  : entry?.dev
+                    ? `Текущая версия опубликована в dev: v${entry.dev.version}`
+                    : "Черновик ещё не сохранялся на сервере"}
             </p>
           </div>
 

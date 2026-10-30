@@ -143,7 +143,7 @@ export default function FeatureSettingsPage() {
     return <ErrorState error={new Error("Сборка не объявляет схему общих настроек")} title="У этой фичи нет общих настроек" />;
   }
 
-  const hasDraft = Boolean(entry?.draft || dirty || autosave.lastSavedAt);
+  const hasDraft = Boolean(entry?.draft || dirty);
   const pendingDraft = Boolean(entry?.draft && (!entry.dev || entry.draft.version > entry.dev.version));
 
   return (
@@ -158,7 +158,7 @@ export default function FeatureSettingsPage() {
             <h1 className="text-lg font-semibold">Тексты страницы «{feature.name}»</h1>
             <p className="mt-1 text-sm text-muted-foreground">Общие тексты и настройки коллекции. Они публикуются независимо от снапшота сайта.</p>
             <div className="mt-3 flex flex-wrap items-center gap-2">
-              {autosave.status === "saving" ? <Badge variant="info"><Loader2 className="h-3 w-3 animate-spin" />Сохранение</Badge> : dirty ? <Badge variant="warning"><CloudUpload className="h-3 w-3" />Есть изменения</Badge> : hasDraft ? <Badge variant="success"><Check className="h-3 w-3" />Сохранено</Badge> : <Badge variant="muted">Черновик отсутствует</Badge>}
+              {autosave.status === "saving" ? <Badge variant="info"><Loader2 className="h-3 w-3 animate-spin" />Сохранение</Badge> : dirty ? <Badge variant="warning"><CloudUpload className="h-3 w-3" />Есть изменения</Badge> : hasDraft ? <Badge variant="success"><Check className="h-3 w-3" />Сохранено</Badge> : entry?.dev ? <Badge variant="success"><Check className="h-3 w-3" />Опубликовано</Badge> : <Badge variant="muted">Черновик отсутствует</Badge>}
               {entry?.dev && <Badge variant="secondary">dev v{entry.dev.version}</Badge>}
               {entry?.prod && <Badge variant="success">prod v{entry.prod.version}</Badge>}
             </div>
