@@ -42,6 +42,11 @@ type SnapshotSchemaProvider interface {
 	FormSchema(context.Context, environment.Environment, string) (uuid.UUID, json.RawMessage, error)
 }
 
+type SubmissionListSchemaProvider interface {
+	SnapshotSchemaProvider
+	FormSchemaForListing(context.Context, environment.Environment, string) (uuid.UUID, json.RawMessage, error)
+}
+
 func NewService(repo *Repository, featureRepo *features.Repository) *Service {
 	return &Service{repo: repo, featureRepo: featureRepo}
 }
@@ -258,9 +263,15 @@ func (s *Service) formContext(ctx context.Context, env environment.Environment, 
 		return features.Feature{}, FormSchema{}, nil, &ValidationError{Message: "Feature не является формой"}
 	}
 	if s.schemas != nil {
+		listSchema := func(ctx context.Context, env environment.Environment, key string) (uuid.UUID, json.RawMessage, error) {
+			if provider, ok := s.schemas.(SubmissionListSchemaProvider); ok {
+				return provider.FormSchemaForListing(ctx, env, key)
+			}
+			return s.schemas.FormSchema(ctx, env, key)
+		}
 		if env == "" {
-			devID, devSchema, devErr := s.schemas.FormSchema(ctx, environment.Dev, key)
-			prodID, prodSchema, prodErr := s.schemas.FormSchema(ctx, environment.Prod, key)
+			devID, devSchema, devErr := listSchema(ctx, environment.Dev, key)
+			prodID, prodSchema, prodErr := listSchema(ctx, environment.Prod, key)
 			if devErr != nil && prodErr != nil {
 				return features.Feature{}, FormSchema{}, nil, devErr
 			}
@@ -276,7 +287,7 @@ func (s *Service) formContext(ctx context.Context, env environment.Environment, 
 			return feature, FormSchema{FeatureID: feature.ID, FeatureKey: feature.Key, VersionID: schemaID, Schema: schema, Environment: schemaEnv}, fields, nil
 		}
 		schemaEnv := env
-		schemaID, schema, err := s.schemas.FormSchema(ctx, schemaEnv, key)
+		schemaID, schema, err := listSchema(ctx, schemaEnv, key)
 		if err != nil {
 			return features.Feature{}, FormSchema{}, nil, err
 		}

@@ -696,6 +696,17 @@ func (s *SnapshotService) FormSchema(ctx context.Context, env environment.Enviro
 	return uuid.Nil, nil, ErrNotFound
 }
 
+// FormSchemaForListing returns no schema when the selected environment has
+// no active snapshot or the feature is not installed in that snapshot. Old
+// submissions remain queryable even after an environment has been cleared.
+func (s *SnapshotService) FormSchemaForListing(ctx context.Context, env environment.Environment, key string) (uuid.UUID, json.RawMessage, error) {
+	id, schema, err := s.FormSchema(ctx, env, key)
+	if errors.Is(err, ErrSnapshotUnavailable) || errors.Is(err, ErrNotFound) {
+		return uuid.Nil, nil, nil
+	}
+	return id, schema, err
+}
+
 // ContentSchema returns the editor schema pinned by the active site snapshot.
 // It makes content authoring follow the version that is actually composed on
 // the site, even if newer feature builds have been uploaded but not promoted.

@@ -13,6 +13,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"websiteengine/features/forms"
 	"websiteengine/pkg/environment"
 )
 
@@ -274,7 +275,7 @@ func TestSnapshotPinnedFormSchemaAndPersistentSubmissions(t *testing.T) {
 	}
 	submissionID := response["id"].(string)
 
-	status, allEnvironments, _ := env.request(http.MethodGet, "/api/v1/admin/forms/"+key+"/submissions", env.adminToken, nil)
+	status, allEnvironments, _ := env.request(http.MethodGet, "/api/v1/admin/forms/"+key+"/submissions?environment=all", env.adminToken, nil)
 	if status != http.StatusOK {
 		t.Fatalf("list form submissions across all environments: status=%d body=%v", status, allEnvironments)
 	}
@@ -289,6 +290,15 @@ func TestSnapshotPinnedFormSchemaAndPersistentSubmissions(t *testing.T) {
 	field, _ := fields[0].(map[string]any)
 	if field["key"] != "name" || field["label"] != "name" {
 		t.Fatalf("unexpected searchable field metadata: %v", fields)
+	}
+	status, emptyProd, _ := env.request(http.MethodGet, "/api/v1/admin/forms/"+key+"/submissions?environment=prod", env.adminToken, nil)
+	prodItems, _ := emptyProd["items"].([]any)
+	prodFields, _ := emptyProd["fields"].([]any)
+	if _, _, _, err := env.forms.List(context.Background(), key, forms.ListFilter{Environment: environment.Prod, Limit: 50}); err != nil {
+		t.Fatalf("list submissions through service before prod snapshot is published: %v", err)
+	}
+	if status != http.StatusOK || len(prodItems) != 0 || len(prodFields) != 0 {
+		t.Fatalf("list submissions before prod snapshot is published: status=%d body=%v", status, emptyProd)
 	}
 	status, filtered, _ := env.request(http.MethodGet, "/api/v1/admin/forms/"+key+"/submissions?field=name&q=Ada", env.adminToken, nil)
 	filteredItems, _ := filtered["items"].([]any)

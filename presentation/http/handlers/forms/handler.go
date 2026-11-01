@@ -197,7 +197,7 @@ func parseFilter(w http.ResponseWriter, r *http.Request, withCursor bool) (forms
 		Sort:            strings.ToLower(q.Get("sort")),
 		Limit:           limit,
 	}
-	if raw := q.Get("environment"); raw != "" {
+	if raw := strings.TrimSpace(q.Get("environment")); raw != "" && !strings.EqualFold(raw, "all") {
 		env, err := environment.Parse(raw)
 		if err != nil {
 			return forms.ListFilter{}, err
