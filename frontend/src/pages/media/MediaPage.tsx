@@ -656,7 +656,7 @@ function MediaDetailDialog({
           <div className="overflow-hidden rounded-lg border border-border bg-muted/30">
             {isImageMedia(media) && media.status === "ready" ? (
               <img
-                src={mediaPreviewUrl(media, "medium")}
+                src={mediaPreviewUrl(media)}
                 alt={media.original_filename}
                 className="max-h-[45vh] w-full object-contain"
               />
@@ -907,7 +907,7 @@ function MediaGridCard({
         aria-label={`Открыть ${media.original_filename}`}
       >
         <div className="relative aspect-[4/3] bg-muted/40">
-          <MediaThumb media={media} variant="thumbnail" />
+          <MediaThumb media={media} />
           <span className="absolute left-2 top-2">
             <MediaStatusBadge status={media.status} />
           </span>
@@ -968,7 +968,7 @@ function MediaTable({
                     className="h-9 w-9 shrink-0 overflow-hidden rounded border border-border bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                     aria-label={`Открыть ${media.original_filename}`}
                   >
-                    <MediaThumb media={media} variant="thumbnail" />
+                    <MediaThumb media={media} />
                   </button>
                   <button
                     type="button"

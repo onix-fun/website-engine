@@ -111,9 +111,66 @@ export interface ContentFeature {
   name: string;
   mode: FeatureType;
   version: string;
+  buildDigest: string;
   schema: JsonObject;
   settingsSchema?: JsonObject;
   submissionSchema?: JsonObject;
+}
+
+export interface MediaRenditionContext {
+  featureKey: string;
+  buildVersion?: string;
+  schemaKind: "content" | "settings" | "arguments";
+  fieldPath: string;
+  buildDigest: string;
+}
+
+export interface DesignFont {
+  family: string;
+  mediaId: string;
+  weight: string;
+  style: "normal" | "italic";
+  unicodeRange?: string;
+}
+
+export interface DesignSystem {
+  formatVersion: 1;
+  tokens: Record<string, string>;
+  mobileTokens: Record<string, string>;
+  fonts: DesignFont[];
+  fontRoles: Record<"body" | "display" | "header" | "hero", string>;
+  brandLogoMediaId?: string;
+}
+
+export interface DesignSystemState {
+  revision: number;
+  draft: DesignSystem;
+  updatedAt: string;
+}
+
+export interface DesignTokenDefinition {
+  key: string;
+  label: string;
+  group: string;
+  kind: "color" | "value";
+  default: string;
+  scope?: "mobile";
+}
+
+export interface MediaRenditionOutput {
+  url: string;
+  width?: number;
+  height?: number;
+  mimeType: string;
+}
+
+export interface MediaRenditionState {
+  mediaId: string;
+  profileHash?: string;
+  buildDigest?: string;
+  status: "pending" | "processing" | "ready" | "failed";
+  outputs?: Record<string, MediaRenditionOutput>;
+  error?: string;
 }
 
 export interface EntryDetail {
@@ -162,6 +219,15 @@ export interface Submission {
   archived_at?: string | null;
   deleted_at?: string | null;
 }
+
+export interface SubmissionField {
+  key: string;
+  label: string;
+}
+
+export type SubmissionListResponse = ListResponse<Submission> & {
+  fields: SubmissionField[];
+};
 
 export interface Media {
   id: string;
@@ -390,7 +456,8 @@ export interface SitePage {
 
 export interface RouteTreeNode {
   id: string;
-  type: "index" | "static" | "param" | "regex" | "catchAll";
+  type: "site" | "path" | "index" | "static" | "param" | "regex" | "catchAll";
+  path?: string;
   value?: string;
   name?: string;
   pattern?: string;
@@ -399,7 +466,7 @@ export interface RouteTreeNode {
 }
 
 export interface SiteConfig {
-  formatVersion: 2;
+  formatVersion: 2 | 3;
   pages: SitePage[];
   routeTree: RouteTreeNode;
 }
@@ -463,18 +530,14 @@ export interface EnvironmentPatch {
   revision: number;
   name?: string;
   public_base_url?: string;
-  domains?: string[];
   cors_origins?: string[];
-  tls_enabled?: boolean;
 }
 
 export interface SiteEnvironment {
   key: Environment;
   name: string;
   public_base_url: string;
-  domains: string[];
   http_port: number;
-  tls_enabled: boolean;
   cors_origins: string[];
   active_snapshot_id?: string | null;
   revision: number;

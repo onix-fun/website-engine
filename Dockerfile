@@ -20,10 +20,10 @@ COPY --from=web /src/pkg/runtime/dist ./pkg/runtime/dist
 RUN CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} go build -trimpath -ldflags="-s -w" -o /out/server ./cmd/api
 
 FROM alpine:3.21
-RUN apk add --no-cache ca-certificates tzdata \
+RUN apk add --no-cache ca-certificates tzdata ffmpeg \
     && addgroup -S app \
     && adduser -S -G app app \
-    && mkdir -p /data/releases /data/tls \
+    && mkdir -p /data/releases \
     && chown -R app:app /data
 COPY --from=backend /out/server /usr/local/bin/server
 USER app

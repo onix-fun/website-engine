@@ -236,7 +236,9 @@ export default function ContentEditorPage() {
     canRedo,
   } = useEditorHistory<DocumentState>({ metadata: {}, blocks: [] });
 
-  const [seeded, setSeeded] = useState(false);
+  const editorIdentity = `${feature.id}:${entryId ?? "new"}`;
+  const [seededIdentity, setSeededIdentity] = useState<string | null>(null);
+  const seeded = seededIdentity === editorIdentity;
   const guardBypassRef = useRef(false);
   const [preview, setPreview] = useState(false);
   const [previewWidth, setPreviewWidth] = useState<PreviewWidth>("desktop");
@@ -346,9 +348,10 @@ export default function ContentEditorPage() {
       entry?.id ?? entryId ?? null,
       entry?.revision ?? 1,
     );
-    setSeeded(true);
+    setSeededIdentity(editorIdentity);
   }, [
     seeded,
+    editorIdentity,
     schemaQuery.isLoading,
     entryId,
     entryQuery.isLoading,
@@ -1145,6 +1148,9 @@ export default function ContentEditorPage() {
             onChange={updateMetadata}
             disabled={archived}
             issues={blockingIssues}
+            featureKey={activeContentFeature.key}
+            buildDigest={activeContentFeature.buildDigest}
+            schemaKind="content"
           />
         </div>
       )}

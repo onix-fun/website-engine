@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ArrowDown,
   ArrowUp,
@@ -10,9 +11,9 @@ import {
   Trash2,
   X,
 } from "lucide-react";
-import type { JsonObject, JsonValue } from "@/types";
+import type { JsonObject, JsonValue, MediaRenditionContext } from "@/types";
 import type { SchemaFieldNode } from "@/domains/content-schema/types";
-import { publicMediaPath } from "@/api";
+import { api, publicMediaPath } from "@/api";
 import { Button } from "@/components/ui/button";
 import { Input, Label, Textarea } from "@/components/ui/input";
 import {
@@ -51,8 +52,22 @@ export interface EntryFormIssue {
 export interface MediaPickTarget {
   label: string;
   single: boolean;
-  accept?: "image" | "all";
+  accept?: "image" | "video" | "all";
+  fieldPath: string;
+  preparation?: MediaRenditionContext;
   apply: (media: Media[]) => void;
+}
+
+const MediaRenditionScope = createContext<Omit<MediaRenditionContext, "fieldPath"> | null>(null);
+
+function pointerPart(value: string): string {
+  return value.replace(/~/g, "~0").replace(/\//g, "~1");
+}
+
+function mediaAccept(profile: JsonObject | undefined): "image" | "video" | "all" {
+  if (profile?.accept === "video") return "video";
+  if (profile?.accept === "file") return "all";
+  return "image";
 }
 
 function isRecordValue(value: JsonValue | undefined): value is JsonObject {
@@ -273,6 +288,7 @@ function FieldCard({
 
 function MediaValue({
   mediaId,
+  fieldPath,
   variant = "image",
   onPick,
   onClear,
@@ -280,14 +296,84 @@ function MediaValue({
   compact,
 }: {
   mediaId: string;
+  fieldPath: string;
   variant?: "image" | "file";
   onPick: () => void;
   onClear: () => void;
   disabled?: boolean;
   compact?: boolean;
 }) {
+  const scope = useContext(MediaRenditionScope);
+  const queryClient = useQueryClient();
+  const preparation = useMemo(
+    () => (scope && fieldPath ? { ...scope, fieldPath } : null),
+    [fieldPath, scope],
+  );
+  const stateKey = useMemo(
+    () => ["media", "rendition", mediaId, preparation?.featureKey, preparation?.schemaKind, fieldPath, preparation?.buildDigest] as const,
+    [fieldPath, mediaId, preparation],
+  );
+  const requestedKey = useRef("");
+  const renditionQuery = useQuery({
+    queryKey: stateKey,
+    queryFn: ({ signal }) => api.media.renditionState(mediaId, preparation!, signal),
+    enabled: Boolean(mediaId && preparation),
+    refetchInterval: (query) => {
+      const status = query.state.data?.status;
+      return status === "pending" || status === "processing" ? 1500 : false;
+    },
+  });
+  useEffect(() => {
+    if (!preparation || !mediaId || renditionQuery.data?.status !== "pending") return;
+    const requestKey = `${mediaId}:${preparation.featureKey}:${preparation.schemaKind}:${fieldPath}:${preparation.buildDigest}`;
+    if (requestedKey.current === requestKey) return;
+    requestedKey.current = requestKey;
+    void api.media.prepareRenditions(mediaId, preparation)
+      .then((state) => queryClient.setQueryData(stateKey, state))
+      .catch((error: unknown) => {
+        queryClient.setQueryData(stateKey, {
+          mediaId,
+          status: "failed",
+          outputs: {},
+          error: error instanceof Error ? error.message : "Не удалось поставить обработку в очередь",
+        });
+      });
+  }, [fieldPath, mediaId, preparation, queryClient, renditionQuery.data?.status, stateKey]);
+  const retryProcessing = async () => {
+    if (!preparation) return;
+    requestedKey.current = `${mediaId}:${preparation.featureKey}:${preparation.schemaKind}:${fieldPath}:${preparation.buildDigest}`;
+    try {
+      const state = await api.media.prepareRenditions(mediaId, preparation);
+      queryClient.setQueryData(stateKey, state);
+    } catch (error) {
+      queryClient.setQueryData(stateKey, {
+        mediaId,
+        status: "failed",
+        outputs: {},
+        error: error instanceof Error ? error.message : "Не удалось поставить обработку в очередь",
+      });
+    }
+  };
+
   return (
     <div className="space-y-2">
+      {mediaId && preparation && renditionQuery.data && (
+        <div className="flex flex-wrap items-center gap-2 text-xs">
+          {renditionQuery.data.status === "ready" ? (
+            <Badge variant="success">Медиа подготовлено</Badge>
+          ) : renditionQuery.data.status === "failed" ? (
+            <>
+              <Badge variant="destructive">Ошибка подготовки</Badge>
+              <span className="text-destructive">{renditionQuery.data.error || "Производные файлы не созданы"}</span>
+              <Button type="button" variant="outline" size="sm" onClick={() => void retryProcessing()}>
+                Повторить
+              </Button>
+            </>
+          ) : (
+            <Badge variant="info">Подготовка медиа…</Badge>
+          )}
+        </div>
+      )}
       {mediaId ? (
         <div className="overflow-hidden rounded-md border border-border">
           {variant === "image" ? (
@@ -348,6 +434,7 @@ function enumSelect(field: SchemaFieldNode): {
 
 function ScalarControl({
   field,
+  fieldPath,
   value,
   onChange,
   onPickMedia,
@@ -355,6 +442,7 @@ function ScalarControl({
   compact,
 }: {
   field: SchemaFieldNode;
+  fieldPath: string;
   value: JsonValue;
   onChange: (value: JsonValue) => void;
   onPickMedia: (target: MediaPickTarget) => void;
@@ -480,6 +568,7 @@ function ScalarControl({
       return (
         <MediaValue
           mediaId={typeof value === "string" ? value : ""}
+          fieldPath={fieldPath}
           variant={field.type === "file" ? "file" : "image"}
           disabled={disabled}
           compact={compact}
@@ -487,7 +576,8 @@ function ScalarControl({
             onPickMedia({
               label: field.label || field.key,
               single: true,
-              accept: field.type === "file" ? "all" : "image",
+              accept: field.type === "file" ? "all" : mediaAccept(field.mediaProfile),
+              fieldPath,
               apply: (media) => {
                 const first = media[0];
                 if (first) onChange(first.id);
@@ -532,6 +622,7 @@ function ArrayTable({
   disabled,
   errorsByPath,
   path,
+  schemaPath,
 }: {
   field: SchemaFieldNode;
   value: JsonValue[];
@@ -540,6 +631,7 @@ function ArrayTable({
   disabled?: boolean;
   errorsByPath: Map<string, string>;
   path: string;
+  schemaPath: string;
 }) {
   const rows = value;
   const children = field.children.filter((child) => child.key.trim());
@@ -584,18 +676,21 @@ function ArrayTable({
     cellValue: JsonValue,
     setCell: (value: JsonValue) => void,
     cellPath: string,
+    cellSchemaPath: string,
   ): ReactNode => {
     if (child.type === "media" || child.type === "file") {
       return (
         <MediaValue
           mediaId={typeof cellValue === "string" ? cellValue : ""}
+          fieldPath={cellSchemaPath}
           variant={child.type === "file" ? "file" : "image"}
           disabled={disabled}
           onPick={() =>
             onPickMedia({
               label: `${field.label || field.key} · ${child.label || child.key}`,
               single: true,
-              accept: child.type === "file" ? "all" : "image",
+              accept: child.type === "file" ? "all" : mediaAccept(child.mediaProfile),
+              fieldPath: cellSchemaPath,
               apply: (media) => {
                 const first = media[0];
                 if (first) setCell(first.id);
@@ -621,6 +716,7 @@ function ArrayTable({
           onPickMedia={onPickMedia}
           disabled={disabled}
           compact
+          fieldPath={cellSchemaPath}
         />
         {errorsByPath.get(cellPath) && (
           <p className="mt-1 text-2xs text-destructive">
@@ -678,6 +774,7 @@ function ArrayTable({
                           record[child.key],
                           (next) => setRow(index, { ...record, [child.key]: next }),
                           cellPath,
+                          `${schemaPath}/items/${pointerPart(child.key)}`,
                         )
                       );
                     return (
@@ -779,6 +876,7 @@ function ScalarArrayList({
   disabled,
   errorsByPath,
   path,
+  schemaPath,
 }: {
   field: SchemaFieldNode;
   value: JsonValue[];
@@ -787,6 +885,7 @@ function ScalarArrayList({
   disabled?: boolean;
   errorsByPath: Map<string, string>;
   path: string;
+  schemaPath: string;
 }) {
   const canAdd = !field.maxItems || value.length < field.maxItems;
   const minItemsAllowed = field.minItems ?? 0;
@@ -811,6 +910,7 @@ function ScalarArrayList({
               <div className="min-w-0 flex-1">
                 <MediaValue
                   mediaId={typeof item === "string" ? item : ""}
+                  fieldPath={`${schemaPath}/items`}
                   variant={field.itemType === "file" ? "file" : "image"}
                   disabled={disabled}
                   compact
@@ -818,7 +918,8 @@ function ScalarArrayList({
                     onPickMedia({
                       label: `${field.label || field.key} (${index + 1})`,
                       single: true,
-                      accept: field.itemType === "file" ? "all" : "image",
+                      accept: field.itemType === "file" ? "all" : mediaAccept(field.itemMediaProfile),
+                      fieldPath: `${schemaPath}/items`,
                       apply: (media) => {
                         const first = media[0];
                         if (first) {
@@ -854,6 +955,7 @@ function ScalarArrayList({
                 value={item}
                 disabled={disabled}
                 compact={field.itemType === "boolean"}
+                fieldPath={`${schemaPath}/items`}
                 onChange={(next) => {
                   const copy = [...value];
                   copy[index] = next;
@@ -948,6 +1050,7 @@ function ObjectFields({
   disabled,
   errorsByPath,
   path,
+  schemaPath,
 }: {
   field: SchemaFieldNode;
   value: JsonObject;
@@ -956,6 +1059,7 @@ function ObjectFields({
   disabled?: boolean;
   errorsByPath: Map<string, string>;
   path: string;
+  schemaPath: string;
 }) {
   const children = field.children.filter((child) => child.key.trim());
   if (children.length === 0) {
@@ -969,6 +1073,7 @@ function ObjectFields({
     <div className="space-y-3">
       {children.map((child) => {
         const childPath = `${path}.${child.key}`;
+        const childSchemaPath = `${schemaPath}/${pointerPart(child.key)}`;
         const error = errorsByPath.get(childPath);
         return (
           <div key={child.id}>
@@ -994,6 +1099,7 @@ function ObjectFields({
                   disabled={disabled}
                   errorsByPath={errorsByPath}
                   path={childPath}
+                  schemaPath={childSchemaPath}
                 />
               </div>
             ) : child.type === "array" ? (
@@ -1006,6 +1112,7 @@ function ObjectFields({
                   disabled={disabled}
                   errorsByPath={errorsByPath}
                   path={childPath}
+                  schemaPath={childSchemaPath}
                 />
               </div>
             ) : (
@@ -1017,6 +1124,7 @@ function ObjectFields({
                   onChange={(next) => onChange({ ...value, [child.key]: next })}
                   onPickMedia={onPickMedia}
                   compact={child.type === "enum" || child.type === "boolean"}
+                  fieldPath={childSchemaPath}
                 />
               </div>
             )}
@@ -1036,6 +1144,7 @@ function ArrayEditorValue({
   disabled,
   errorsByPath,
   path,
+  schemaPath,
 }: {
   field: SchemaFieldNode;
   value: JsonValue[];
@@ -1044,6 +1153,7 @@ function ArrayEditorValue({
   disabled?: boolean;
   errorsByPath: Map<string, string>;
   path: string;
+  schemaPath: string;
 }) {
   if (field.itemType === "object") {
     return (
@@ -1055,6 +1165,7 @@ function ArrayEditorValue({
         disabled={disabled}
         errorsByPath={errorsByPath}
         path={path}
+        schemaPath={schemaPath}
       />
     );
   }
@@ -1067,6 +1178,7 @@ function ArrayEditorValue({
       disabled={disabled}
       errorsByPath={errorsByPath}
       path={path}
+      schemaPath={schemaPath}
     />
   );
 }
@@ -1148,6 +1260,9 @@ export function EntryFieldsForm({
   onChange,
   disabled,
   issues,
+  featureKey,
+  buildDigest,
+  schemaKind,
 }: {
   /** Visible schema fields (without the legacy blocks key). */
   fields: SchemaFieldNode[];
@@ -1155,12 +1270,22 @@ export function EntryFieldsForm({
   onChange: (key: string, value: JsonValue) => void;
   disabled?: boolean;
   issues: EntryFormIssue[];
+  featureKey?: string;
+  buildDigest?: string;
+  schemaKind?: "content" | "settings";
 }) {
+  const scope = useMemo(
+    () => (featureKey && buildDigest && schemaKind ? { featureKey, buildDigest, schemaKind } : null),
+    [buildDigest, featureKey, schemaKind],
+  );
   const [mediaTarget, setMediaTarget] = useState<MediaPickTarget | null>(null);
   const [jsonField, setJsonField] = useState<SchemaFieldNode | null>(null);
-  const openMediaPick = useCallback (
-    (target: MediaPickTarget) => setMediaTarget(target),
-    [setMediaTarget],
+  const openMediaPick = useCallback(
+    (target: MediaPickTarget) => setMediaTarget({
+      ...target,
+      preparation: scope ? { ...scope, fieldPath: target.fieldPath } : undefined,
+    }),
+    [scope],
   );
 
   const errorsByPath = useMemo(() => {
@@ -1180,6 +1305,7 @@ export function EntryFieldsForm({
   }
 
   return (
+    <MediaRenditionScope.Provider value={scope}>
     <div className="space-y-3">
       {fields.map((field) => {
         const error = errorsByPath.get(field.key);
@@ -1215,6 +1341,7 @@ export function EntryFieldsForm({
                 disabled={disabled}
                 errorsByPath={errorsByPath}
                 path={field.key}
+                schemaPath={`/${pointerPart(field.key)}`}
               />
             ) : field.type === "array" ? (
               <ArrayEditorValue
@@ -1225,6 +1352,7 @@ export function EntryFieldsForm({
                 disabled={disabled}
                 errorsByPath={errorsByPath}
                 path={field.key}
+                schemaPath={`/${pointerPart(field.key)}`}
               />
             ) : (
               <ScalarControl
@@ -1233,6 +1361,7 @@ export function EntryFieldsForm({
                 disabled={disabled}
                 onChange={(next) => onChange(field.key, next)}
                 onPickMedia={openMediaPick}
+                fieldPath={`/${pointerPart(field.key)}`}
               />
             )}
           </FieldCard>
@@ -1252,6 +1381,7 @@ export function EntryFieldsForm({
         mode={mediaTarget?.single === false ? "multiple" : "single"}
         accept={mediaTarget?.accept ?? "image"}
         title={mediaTarget ? `Выбрать: ${mediaTarget.label}` : "Выбрать файл"}
+        preparation={mediaTarget?.preparation}
       />
 
       {jsonField && (
@@ -1264,6 +1394,7 @@ export function EntryFieldsForm({
         />
       )}
     </div>
+    </MediaRenditionScope.Provider>
   );
 }
 

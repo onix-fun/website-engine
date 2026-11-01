@@ -192,9 +192,7 @@ type SiteEnvironment struct {
 	Key              string    `gorm:"column:key;primaryKey;not null"`
 	Name             string    `gorm:"column:name;not null"`
 	PublicBaseURL    string    `gorm:"column:public_base_url;not null;default:''"`
-	Domains          TextArray `gorm:"column:domains;not null;default:'{}'"`
 	HTTPPort         int       `gorm:"column:http_port;not null;type:integer"`
-	TLSEnabled       bool      `gorm:"column:tls_enabled;not null;default:false"`
 	CORSOrigins      TextArray `gorm:"column:cors_origins;not null;default:'{}'"`
 	ActiveReleaseID  *UUID     `gorm:"column:active_release_id"`
 	ActiveSnapshotID *UUID     `gorm:"column:active_snapshot_id"`

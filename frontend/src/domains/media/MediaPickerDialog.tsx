@@ -9,6 +9,7 @@ import {
   uploadMediaFile,
 } from "@/api";
 import type { Media } from "@/types";
+import type { MediaRenditionContext } from "@/types";
 import { queryKeys } from "@/lib/query-keys";
 import { formatBytes } from "@/lib/format";
 import { cn, uid } from "@/lib/utils";
@@ -27,11 +28,13 @@ import { EmptyState, ErrorState, LoadingPage } from "@/components/common/page";
 import { MediaStatusBadge } from "@/components/common/status-badges";
 import { MediaThumb } from "./media-preview";
 
-type Accept = "image" | "video" | "all";
+type Accept = "image" | "raster-image" | "video" | "font" | "all";
 
 function accepts(media: Media, accept: Accept): boolean {
   if (accept === "image") return media.content_type.startsWith("image/");
+  if (accept === "raster-image") return ["image/jpeg", "image/png", "image/webp"].includes(media.content_type);
   if (accept === "video") return media.content_type.startsWith("video/");
+  if (accept === "font") return media.content_type === "font/woff2";
   return true;
 }
 
@@ -43,6 +46,7 @@ export function MediaPickerDialog({
   accept = "all",
   initialSelected = [],
   title = "Выбрать медиа",
+  preparation,
 }: {
   open: boolean;
   onClose: () => void;
@@ -51,6 +55,7 @@ export function MediaPickerDialog({
   accept?: Accept;
   initialSelected?: string[];
   title?: string;
+  preparation?: MediaRenditionContext;
 }) {
   const queryClient = useQueryClient();
   const [search, setSearch] = useState("");
@@ -135,8 +140,19 @@ export function MediaPickerDialog({
   };
 
   const confirm = () => {
-    onSelect(selectedMedia);
+    const selection = selectedMedia;
+    onSelect(selection);
     onClose();
+    if (preparation) {
+      void Promise.allSettled(
+        selection.map((media) => api.media.prepareRenditions(media.id, preparation)),
+      ).then((results) => {
+        const failed = results.find((result) => result.status === "rejected");
+        if (failed?.status === "rejected") {
+          toast.error(failed.reason instanceof Error ? failed.reason.message : "Не удалось подготовить медиа");
+        }
+      });
+    }
   };
 
   return (
@@ -165,7 +181,7 @@ export function MediaPickerDialog({
             ref={fileInput}
             type="file"
             className="sr-only"
-            accept={accept === "image" ? "image/*" : accept === "video" ? "video/mp4" : undefined}
+            accept={accept === "image" ? "image/*" : accept === "raster-image" ? "image/jpeg,image/png,image/webp" : accept === "video" ? "video/*" : accept === "font" ? "font/woff2,.woff2" : undefined}
             onChange={(event) => void handleUpload(event.target.files?.[0])}
             aria-label="Загрузить новый файл"
           />
@@ -238,7 +254,7 @@ export function MediaPickerDialog({
                     )}
                   >
                     <div className="aspect-[4/3] bg-muted/40">
-                      <MediaThumb media={media} variant="thumbnail" />
+                      <MediaThumb media={media} />
                     </div>
                     <div className="p-2">
                       <p className="truncate text-xs font-medium" title={media.original_filename}>

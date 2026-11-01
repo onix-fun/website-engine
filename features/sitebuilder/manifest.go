@@ -12,10 +12,13 @@ import (
 	"regexp"
 	"strings"
 
+	"websiteengine/features/media"
 	"websiteengine/pkg/platform/validate"
 )
 
-const CurrentEngineAPI = "1"
+const CurrentEngineAPI = "2"
+
+var supportedEngineAPIs = map[string]bool{"1": true, "2": true}
 
 var (
 	featureKeyPattern = regexp.MustCompile(`^[a-z][a-z0-9-]{0,99}$`)
@@ -109,7 +112,7 @@ func (m Manifest) Validate() error {
 	if !versionPattern.MatchString(m.Version) {
 		return errors.New("version must use semantic version format, for example 1.2.3")
 	}
-	if m.EngineAPI != CurrentEngineAPI {
+	if !supportedEngineAPIs[m.EngineAPI] {
 		return fmt.Errorf("engineApi %q is not supported (current: %q)", m.EngineAPI, CurrentEngineAPI)
 	}
 	if !validAssetPath(m.Entry) || !strings.HasSuffix(strings.ToLower(m.Entry), ".js") {
@@ -139,6 +142,9 @@ func (m Manifest) Validate() error {
 	if err := validateObjectSchema(m.Arguments, "arguments"); err != nil {
 		return err
 	}
+	if err := media.ValidateSchemaProfiles(m.Arguments); err != nil {
+		return fmt.Errorf("arguments: %w", err)
+	}
 	switch m.Content.Mode {
 	case "single", "collection", "form":
 	default:
@@ -150,12 +156,18 @@ func (m Manifest) Validate() error {
 	if err := validateObjectSchema(m.Content.Schema, "content.schema"); err != nil {
 		return err
 	}
+	if err := media.ValidateSchemaProfiles(m.Content.Schema); err != nil {
+		return fmt.Errorf("content.schema: %w", err)
+	}
 	if len(m.Content.SettingsSchema) > 0 {
 		if m.Content.Mode != "collection" {
 			return errors.New("content.settingsSchema is only valid when content.mode is collection")
 		}
 		if err := validateObjectSchema(m.Content.SettingsSchema, "content.settingsSchema"); err != nil {
 			return err
+		}
+		if err := media.ValidateSchemaProfiles(m.Content.SettingsSchema); err != nil {
+			return fmt.Errorf("content.settingsSchema: %w", err)
 		}
 	}
 	if m.Content.Form != nil {
@@ -171,6 +183,9 @@ func (m Manifest) Validate() error {
 		if err := validateObjectSchema(m.Content.Form.SubmissionSchema, "content.form.submissionSchema"); err != nil {
 			return err
 		}
+		if err := media.ValidateSchemaProfiles(m.Content.Form.SubmissionSchema); err != nil {
+			return fmt.Errorf("content.form.submissionSchema: %w", err)
+		}
 	}
 	if m.Form != nil {
 		if m.Content.Mode != "form" {
@@ -181,6 +196,9 @@ func (m Manifest) Validate() error {
 		}
 		if err := validateObjectSchema(m.Form.SubmissionSchema, "form.submissionSchema"); err != nil {
 			return err
+		}
+		if err := media.ValidateSchemaProfiles(m.Form.SubmissionSchema); err != nil {
+			return fmt.Errorf("form.submissionSchema: %w", err)
 		}
 	}
 	return nil

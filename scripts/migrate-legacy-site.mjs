@@ -23,6 +23,18 @@ async function readLegacy(name) {
   return JSON.parse(await readFile(path.join(dataDir, name), 'utf8'))
 }
 
+async function walkFiles(directory, prefix = '') {
+  const entries = (await readdir(directory, { withFileTypes: true })).sort((a, b) => a.name.localeCompare(b.name))
+  const files = []
+  for (const entry of entries) {
+    const relative = path.posix.join(prefix, entry.name)
+    const absolute = path.join(directory, entry.name)
+    if (entry.isDirectory()) files.push(...await walkFiles(absolute, relative))
+    else if (entry.isFile()) files.push(relative)
+  }
+  return files
+}
+
 async function request(route, options = {}) {
   const response = await fetch(`${engineUrl}${route}`, {
     ...options,
@@ -70,19 +82,17 @@ async function uploadFeatureBuilds() {
 }
 
 async function uploadLegacyMedia() {
-  const files = (await readdir(assetsDir, { withFileTypes: true }))
-    .filter((entry) => entry.isFile() && !entry.name.toLowerCase().endsWith('.woff2') && !entry.name.endsWith('.txt'))
-    .map((entry) => entry.name)
-    .sort()
-  const existing = await listAll('/api/v1/admin/media?status=ready&type=image')
+  const files = (await walkFiles(assetsDir)).filter((name) => !name.toLowerCase().endsWith('.txt'))
+  const existing = await listAll('/api/v1/admin/media?status=ready')
   const byFilename = new Map(existing.map((media) => [media.original_filename, media.id]))
   const ids = new Map()
-  for (const filename of files) {
+  for (const relative of files) {
+    const filename = path.basename(relative)
     let id = byFilename.get(filename)
     if (!id) {
-      const bytes = await readFile(path.join(assetsDir, filename))
+      const bytes = await readFile(path.join(assetsDir, relative))
       const ext = path.extname(filename).toLowerCase()
-      const contentType = ext === '.svg' ? 'image/svg+xml' : undefined
+      const contentType = ext === '.svg' ? 'image/svg+xml' : ext === '.woff2' ? 'font/woff2' : undefined
       const form = new FormData()
       form.set('file', new Blob([bytes], contentType ? { type: contentType } : undefined), filename)
       const uploaded = await request('/api/v1/admin/media', { method: 'POST', body: form })
@@ -94,6 +104,64 @@ async function uploadLegacyMedia() {
     ids.set(filename, id)
   }
   return ids
+}
+
+const alumniSubsets = {
+  'alumni-sans-sc-cyrillic-ext-wght-normal.woff2': 'U+0460-052F,U+1C80-1C8A,U+20B4,U+2DE0-2DFF,U+A640-A69F,U+FE2E-FE2F',
+  'alumni-sans-sc-cyrillic-wght-normal.woff2': 'U+0301,U+0400-045F,U+0490-0491,U+04B0-04B1,U+2116',
+  'alumni-sans-sc-vietnamese-wght-normal.woff2': 'U+0102-0103,U+0110-0111,U+0128-0129,U+0168-0169,U+01A0-01A1,U+01AF-01B0,U+0300-0301,U+0303-0304,U+0308-0309,U+0323,U+0329,U+1EA0-1EF9,U+20AB',
+  'alumni-sans-sc-latin-ext-wght-normal.woff2': 'U+0100-02BA,U+02BD-02C5,U+02C7-02CC,U+02CE-02D7,U+02DD-02FF,U+0304,U+0308,U+0329,U+1D00-1DBF,U+1E00-1E9F,U+1EF2-1EFF,U+2020,U+20A0-20AB,U+20AD-20C0,U+2113,U+2C60-2C7F,U+A720-A7FF',
+  'alumni-sans-sc-latin-wght-normal.woff2': 'U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD',
+}
+
+async function migrateDesignSystem(mediaIDs) {
+  const missingFonts = Object.keys(alumniSubsets).filter((filename) => !mediaIDs.has(filename))
+  if (missingFonts.length) throw new Error(`Legacy Alumni Sans SC files are missing: ${missingFonts.join(', ')}`)
+  const current = await request('/api/v2/admin/site/design-system')
+  const fonts = Object.entries(alumniSubsets).map(([filename, unicodeRange]) => ({
+    family: 'Alumni Sans SC',
+    mediaId: mediaIDs.get(filename),
+    weight: '100 900',
+    style: 'normal',
+    unicodeRange,
+  }))
+  const designSystem = {
+    ...current.state.draft,
+    brandLogoMediaId: mediaIDs.get('issit_logo.svg'),
+    fonts,
+    fontRoles: { body: 'Alumni Sans SC', display: 'Alumni Sans SC', header: 'Alumni Sans SC', hero: 'Alumni Sans SC' },
+  }
+  const saved = await request('/api/v2/admin/site/design-system', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ revision: current.state.revision, designSystem }),
+  })
+  process.stdout.write(`design system revision ${saved.state.revision} saved (logo and ${fonts.length} Alumni Sans SC subsets)\n`)
+}
+
+async function migrateSiteMetadata(legacySite, home, mediaIDs) {
+  const current = await request('/api/v2/admin/site/metadata')
+  const title = legacySite.documentTitle || legacySite.header?.brand || 'ВитаСил'
+  const description = home.hero?.subtitle || legacySite.footer?.description || ''
+  const metadata = {
+    ...current.draft,
+    siteName: title,
+    description,
+    ogTitle: title,
+    ogDescription: description,
+  }
+  if (legacySite.faviconSrc) metadata.faviconMediaId = mediaID(mediaIDs, legacySite.faviconSrc)
+  const saved = await request('/api/v2/admin/site/metadata', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ revision: current.revision, metadata }),
+  })
+  const published = await request('/api/v2/admin/site/metadata/publish', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({}),
+  })
+  process.stdout.write(`site metadata revision ${saved.revision} saved and published to dev (title: ${published.dev.siteName})\n`)
 }
 
 function mediaID(ids, reference) {
@@ -161,6 +229,7 @@ async function main() {
   ])
   await uploadFeatureBuilds()
   const media = await uploadLegacyMedia()
+  await migrateDesignSystem(media)
   const builds = await request('/api/v2/admin/feature-builds')
   const byKey = new Map()
   for (const build of builds.items ?? []) if (!byKey.has(build.key)) byKey.set(build.key, build)
@@ -231,16 +300,21 @@ async function main() {
     },
   ]
   const config = {
-    formatVersion: 1,
-    documentTitle: legacySite.documentTitle,
+    formatVersion: 3,
     pages,
-    routes: [
-      { id: 'home', pattern: '^/$', pageId: 'home' },
-      { id: 'catalog', pattern: '^/catalog$', pageId: 'catalog' },
-      { id: 'product-detail', pattern: '^/catalog/(?<slug>[^/]+)$', pageId: 'product-detail' },
-      { id: 'form', pattern: '^/form$', pageId: 'form' },
-      { id: 'not-found', pattern: '^/.*$', pageId: 'not-found' },
-    ],
+    routeTree: {
+      id: 'site',
+      type: 'site',
+      children: [
+        { id: 'home', type: 'path', path: '/', pageId: 'home' },
+        {
+          id: 'catalog', type: 'path', path: '/catalog', pageId: 'catalog',
+          children: [{ id: 'product-detail', type: 'param', name: 'slug', pageId: 'product-detail' }],
+        },
+        { id: 'form', type: 'path', path: '/form', pageId: 'form' },
+        { id: 'not-found', type: 'catchAll', name: 'path', pageId: 'not-found' },
+      ],
+    },
   }
 
   const draft = await request('/api/v2/admin/site/draft')
@@ -249,6 +323,7 @@ async function main() {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ revision: draft.revision, config }),
   })
+  await migrateSiteMetadata(legacySite, home, media)
   const snapshot = await request('/api/v2/admin/site/snapshots', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },

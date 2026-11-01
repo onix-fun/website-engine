@@ -1,203 +1,521 @@
-import { useMemo, useState, type PointerEvent, type WheelEvent } from "react";
-import { DndContext, closestCenter, PointerSensor, useSensor, useSensors, type DragEndEvent } from "@dnd-kit/core";
-import { SortableContext, arrayMove, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
-import { CSS } from "@dnd-kit/utilities";
-import { ArrowDown, ArrowUp, Code2, GripVertical, Minus, Plus, Route as RouteIcon, Trash2, ZoomIn, ZoomOut } from "lucide-react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ButtonHTMLAttributes, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, type WheelEvent as ReactWheelEvent } from "react";
+import { AlertTriangle, ArrowDown, ArrowUp, Check, FilePlus2, GitBranch, Home, Link2, Maximize2, Plus, Save, Trash2, ZoomIn, ZoomOut } from "lucide-react";
+import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/input";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import type { RouteTreeNode } from "@/types";
+import { Input, Label } from "@/components/ui/input";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import type { RouteTreeNode, SitePage } from "@/types";
 import { useSiteWorkspace } from "./SiteWorkspace";
+import PageEditorPage from "./PageEditorPage";
+import { addRouteNode, createPageFromRoute, describeRoutes, moveRoutePriority, removeRouteBranch, reparentRoute, updateRouteNode } from "./route-tree";
 
-type Position = { x: number; y: number; width: number; height: number; node: RouteTreeNode; path: string };
-type NewNodeType = Exclude<RouteTreeNode["type"], "index">;
+const NODE_WIDTH = 286;
+const NODE_HEIGHT = 106;
+const COLUMN_GAP = 370;
+const ROW_GAP = 158;
 
-function childSegment(node: RouteTreeNode) {
-  if (node.type === "static") return `/${node.value ?? "segment"}`;
-  if (node.type === "param") return `/:${node.name ?? "param"}`;
-  if (node.type === "regex") return `/{${node.pattern ?? "regex"}}`;
-  if (node.type === "catchAll") return `/*${node.name ?? "path"}`;
+type RoutePosition = { node: RouteTreeNode; path: string; captures: string[]; x: number; y: number; width: number; height: number; parentId?: string };
+type OrphanPosition = { page: SitePage; x: number; y: number; width: number; height: number };
+type RouteDialogState = { mode: "root" | "child" | "edit"; parentId?: string; routeId?: string; existingPageId?: string; chooseExisting?: boolean };
+type ContextState = { x: number; y: number; routeId?: string; pageId?: string };
+type PanState = { pointerId: number; clientX: number; clientY: number; originX: number; originY: number };
+type ConnectionState = { pointerId: number; sourceId: string; clientX: number; clientY: number };
+
+function MenuAction({ className = "", ...props }: ButtonHTMLAttributes<HTMLButtonElement>) {
+  return <button role="menuitem" type="button" className={`flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left text-sm outline-none hover:bg-accent focus:bg-accent disabled:pointer-events-none disabled:opacity-40 ${className}`} {...props} />;
+}
+
+function collectPositions(tree: RouteTreeNode): RoutePosition[] {
+  const positions: RoutePosition[] = [];
+  const descriptions = new Map(describeRoutes(tree).map((route) => [route.id, route]));
+  let row = 0;
+  const visit = (node: RouteTreeNode, depth: number, parentId: string | undefined): number => {
+    const description = descriptions.get(node.id);
+    const children = node.children ?? [];
+    const childRows = children.map((child) => visit(child, depth + 1, node.id));
+    const nodeRow = childRows.length ? childRows.reduce((sum, value) => sum + value, 0) / childRows.length : row++;
+    positions.push({
+      node,
+      path: description?.path ?? "/",
+      captures: description?.captures ?? [],
+      x: 40 + depth * COLUMN_GAP,
+      y: 48 + nodeRow * ROW_GAP,
+      width: NODE_WIDTH,
+      height: NODE_HEIGHT,
+      parentId,
+    });
+    return nodeRow;
+  };
+  const roots = tree.type === "site" ? tree.children ?? [] : [tree];
+  roots.forEach((root) => visit(root, 0, undefined));
+  return positions;
+}
+
+function currentNode(tree: RouteTreeNode, id?: string): RouteTreeNode | undefined {
+  if (!id) return undefined;
+  return describeRoutes(tree).find((route) => route.id === id)?.node;
+}
+
+function pageName(pages: SitePage[], id?: string) {
+  return pages.find((page) => page.id === id)?.name;
+}
+
+function displayNodeType(node: RouteTreeNode) {
+  switch (node.type) {
+    case "path": return "Корневой адрес";
+    case "index": return "Главная";
+    case "static": return "Статический сегмент";
+    case "param": return "Параметр пути";
+    case "regex": return "Regex-сегмент";
+    case "catchAll": return "Catch-all";
+    case "site": return "Сайт";
+  }
+}
+
+function readRouteSegment(node: RouteTreeNode): string {
+  if (node.type === "path") return node.path ?? "/";
+  if (node.type === "index") return "/";
+  if (node.type === "static") return node.value ?? "";
+  if (node.type === "param") return `:${node.name ?? "slug"}`;
+  if (node.type === "regex") return `~${node.pattern ?? ""}`;
+  if (node.type === "catchAll") return `*${node.name ?? "path"}`;
   return "";
 }
 
-function collectPositions(root: RouteTreeNode): Position[] {
-  const nodes: Position[] = [];
-  let row = 0;
-  const visit = (node: RouteTreeNode, depth: number, parentPath: string): number => {
-    const path = node.type === "index" ? "/" : `${parentPath === "/" ? "" : parentPath}${childSegment(node)}` || "/";
-    const children = node.children ?? [];
-    const childRows = children.map((child) => visit(child, depth + 1, path));
-    const y = childRows.length ? childRows.reduce((sum, value) => sum + value, 0) / childRows.length : row++ * 116;
-    nodes.push({ x: depth * 258 + 28, y: y * 116 + 32, width: 206, height: 76, node, path });
-    return y;
-  };
-  visit(root, 0, "");
-  return nodes;
+function readRootPath(node: RouteTreeNode): string {
+  if (node.type === "path") return node.path ?? "/";
+  if (node.type === "index") return "/";
+  if (node.type === "static") return `/${node.value ?? ""}`;
+  if (node.type === "param") return `/:${node.name ?? "slug"}`;
+  if (node.type === "regex") return `/~${node.pattern ?? ""}`;
+  if (node.type === "catchAll") return `/*${node.name ?? "path"}`;
+  return "/";
 }
 
-function updateNode(root: RouteTreeNode, id: string, update: (node: RouteTreeNode) => RouteTreeNode): RouteTreeNode {
-  if (root.id === id) return update(root);
-  return { ...root, children: (root.children ?? []).map((child) => updateNode(child, id, update)) };
-}
-
-function removeNode(root: RouteTreeNode, id: string): RouteTreeNode {
-  return { ...root, children: (root.children ?? []).filter((child) => child.id !== id).map((child) => removeNode(child, id)) };
-}
-
-function findNode(root: RouteTreeNode, id: string): RouteTreeNode | undefined {
-  if (root.id === id) return root;
-  for (const child of root.children ?? []) {
-    const found = findNode(child, id);
-    if (found) return found;
+function parseAbsolutePath(value: string): { path?: string; error?: string } {
+  const path = value.trim();
+  if (path === "/") return { path };
+  if (!path.startsWith("/") || path.endsWith("/") || path.length > 500 || path.includes("#")) {
+    return { error: "Введите абсолютный путь без завершающего слеша, query и fragment." };
   }
-  return undefined;
+  const parts = path.slice(1).split("/");
+  if (parts.some((part) => !part)) return { error: "Путь не может содержать пустые сегменты." };
+  for (const [index, part] of parts.entries()) {
+    if (part.includes("?") && !part.startsWith("~")) return { error: "Символ ? допустим только внутри regex-сегмента." };
+    if ((part === "." || part === "..") && !part.startsWith("~")) return { error: "Сегменты . и .. нельзя использовать в маршруте." };
+    if (part.startsWith(":")) {
+      if (!/^[A-Za-z][A-Za-z0-9_]{0,63}$/.test(part.slice(1))) return { error: `Некорректный параметр «${part}».` };
+    } else if (part.startsWith("*")) {
+      if (index !== parts.length - 1 || !/^[A-Za-z][A-Za-z0-9_]{0,63}$/.test(part.slice(1))) return { error: "Catch-all должен быть последним сегментом и иметь имя: *path." };
+    } else if (part.startsWith("~")) {
+      if (!part.slice(1)) return { error: "Regex-сегмент не может быть пустым." };
+    } else if (part.includes("/")) return { error: "Статический сегмент не может содержать /." };
+  }
+  return { path };
 }
 
-function routeTypeName(type: RouteTreeNode["type"]) {
-  return ({ index: "Корень сайта", static: "Статический сегмент", param: "Параметр пути", regex: "Regex-сегмент", catchAll: "Catch-all" })[type];
+function childNodeFromSegment(input: string, id: string, pageId?: string, children: RouteTreeNode[] = []): { node?: RouteTreeNode; error?: string } {
+  const segment = input.trim();
+  if (!segment || segment.includes("/") || segment.includes("#") || (segment.includes("?") && !segment.startsWith("~"))) return { error: "Введите ровно один URL-сегмент." };
+  if (segment === "." || segment === "..") return { error: "Сегменты . и .. нельзя использовать в маршруте." };
+  const common = { id, ...(pageId ? { pageId } : {}), children };
+  if (segment.startsWith(":")) {
+    const name = segment.slice(1);
+    return /^[A-Za-z][A-Za-z0-9_]{0,63}$/.test(name) ? { node: { ...common, type: "param", name } } : { error: "Имя параметра должно начинаться с буквы и содержать только буквы, цифры и _." };
+  }
+  if (segment.startsWith("*")) {
+    const name = segment.slice(1);
+    if (!/^[A-Za-z][A-Za-z0-9_]{0,63}$/.test(name)) return { error: "Catch-all должен иметь имя, например *path." };
+    if (children.length) return { error: "Catch-all не может содержать дочерние маршруты." };
+    return { node: { ...common, type: "catchAll", name } };
+  }
+  if (segment.startsWith("~")) return segment.length > 1 ? { node: { ...common, type: "regex", pattern: segment.slice(1) } } : { error: "Regex-сегмент не может быть пустым." };
+  return { node: { ...common, type: "static", value: segment } };
 }
 
-function SortableBranch({ node, pageName, onSelect, selected }: { node: RouteTreeNode; pageName?: string; onSelect: () => void; selected: boolean }) {
-  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: node.id });
-  return (
-    <div ref={setNodeRef} style={{ transform: CSS.Transform.toString(transform), transition, opacity: isDragging ? 0.5 : 1 }} className="flex items-center gap-1">
-      <button type="button" className="cursor-grab rounded p-1 text-muted-foreground hover:bg-muted" aria-label="Перетащить ветвь" {...attributes} {...listeners}><GripVertical className="size-4" /></button>
-      <button type="button" onClick={onSelect} className={`min-w-0 flex-1 truncate rounded border px-2 py-1.5 text-left text-xs ${selected ? "border-primary bg-primary/5" : "border-border hover:bg-muted"}`}>
-        <span className="font-medium">{childSegment(node)}</span>{pageName && <span className="ml-1 text-muted-foreground">→ {pageName}</span>}
-      </button>
-    </div>
-  );
+function suggestedName(path: string) {
+  if (path === "/") return "Главная";
+  const part = path.split("/").filter(Boolean).at(-1) ?? "Новая страница";
+  const value = part.replace(/^[:*~]/, "").replace(/\(\?<[^>]+>/g, "").replace(/[()?+*]/g, "").replaceAll("[", "").replaceAll("]", "");
+  return value ? value.charAt(0).toLocaleUpperCase("ru-RU") + value.slice(1) : "Новая страница";
+}
+
+function comparableRootPath(path: string) {
+  if (path === "/") return "/";
+  return path.split("/").map((segment) => {
+    if (segment.startsWith(":")) return `{${segment.slice(1)}}`;
+    if (segment.startsWith("*")) return `{${segment.slice(1)}}`;
+    if (segment.startsWith("~")) return `{${Array.from(segment.matchAll(/\(\?<([A-Za-z][A-Za-z0-9_]*)>/g), (match) => match[1])[0] ?? "regex"}}`;
+    return segment;
+  }).join("/");
+}
+
+function defaultRootPath(tree: RouteTreeNode) {
+  const existing = new Set(describeRoutes(tree).map((route) => route.path));
+  let suffix = 1;
+  let candidate = "/new-page";
+  while (existing.has(candidate)) candidate = `/new-page-${++suffix}`;
+  return candidate;
+}
+
+function RouteDialog({
+  state,
+  pages,
+  tree,
+  onClose,
+  onApply,
+}: {
+  state: RouteDialogState | null;
+  pages: SitePage[];
+  tree: RouteTreeNode;
+  onClose: () => void;
+  onApply: (route: RouteTreeNode, parentId?: string | null, page?: SitePage) => void;
+}) {
+  const node = state?.mode === "edit" ? currentNode(tree, state.routeId) : undefined;
+  const descriptor = state?.mode === "edit" ? describeRoutes(tree).find((route) => route.id === state.routeId) : undefined;
+  const isRoot = state?.mode === "root" || (state?.mode === "edit" && descriptor?.parentId === undefined);
+  const [value, setValue] = useState("");
+  const [pageTarget, setPageTarget] = useState("__new");
+  const [name, setName] = useState("");
+  const [kind, setKind] = useState<SitePage["kind"]>("page");
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    if (!state) return;
+    const rootPath = defaultRootPath(tree);
+    setValue(state.mode === "edit" && node ? (isRoot ? readRootPath(node) : readRouteSegment(node)) : state.mode === "root" ? rootPath : "new");
+    setPageTarget(state.mode === "edit" && node?.pageId ? node.pageId : state.existingPageId ?? (state.chooseExisting ? "__select" : "__new"));
+    setName(state.mode === "edit" && node?.pageId ? pageName(pages, node.pageId) ?? "Новая страница" : suggestedName(state.mode === "root" ? rootPath : "new"));
+    setKind("page");
+    setError("");
+  }, [state, node, descriptor?.path, isRoot, pages, tree]);
+
+  const submit = () => {
+    if (!state) return;
+    const id = node?.id ?? `route-${crypto.randomUUID().slice(0, 8)}`;
+    const selectedPage = pageTarget !== "__new" && pageTarget !== "__none" ? pages.find((page) => page.id === pageTarget) : undefined;
+    const page = pageTarget === "__new" ? { id: `page-${crypto.randomUUID().slice(0, 8)}`, name: name.trim() || suggestedName(value), kind, placements: [] } satisfies SitePage : undefined;
+    const pageId = selectedPage?.id ?? page?.id ?? (pageTarget === "__none" ? undefined : node?.pageId);
+    let nextNode: RouteTreeNode | undefined;
+    let validationError: string | undefined;
+
+    if (isRoot) {
+      const parsed = parseAbsolutePath(value);
+      validationError = parsed.error;
+      if (parsed.path) nextNode = { id, type: "path", path: parsed.path, ...(pageId ? { pageId } : {}), children: node?.children ?? [] };
+    } else {
+      const parent = state.parentId ? currentNode(tree, state.parentId) : undefined;
+      if (parent?.type === "catchAll" || (parent?.type === "path" && parent.path?.split("/").filter(Boolean).at(-1)?.startsWith("*"))) {
+        setError("Catch-all маршрут не может содержать дочерние узлы.");
+        return;
+      }
+      const parsed = childNodeFromSegment(value, id, pageId, node?.children ?? []);
+      nextNode = parsed.node;
+      validationError = parsed.error;
+    }
+    if (!validationError && !nextNode) validationError = "Не удалось собрать маршрут.";
+    if (!validationError && pageTarget === "__none" && !(node?.children?.length)) validationError = "Листовой маршрут должен быть связан со страницей.";
+    if (validationError) { setError(validationError); return; }
+    if (!nextNode) { setError("Не удалось собрать маршрут."); return; }
+
+    if (state.mode !== "edit" && !pageId) { setError("Выберите существующую страницу или создайте новую."); return; }
+    if (state.mode === "edit" && pageTarget === "__new" && !node?.pageId && !page) { setError("Укажите название новой страницы."); return; }
+    const current = describeRoutes(tree).filter((route) => route.id !== node?.id);
+    const candidate = nextNode;
+    if (isRoot && candidate.type === "path") {
+      const equivalent = comparableRootPath(candidate.path ?? "/");
+      if (current.some((route) => route.path === equivalent)) { setError("Такой URL уже настроен. Измените путь или привяжите нужную страницу к существующему узлу."); return; }
+    }
+    const parentId = state.mode === "child" ? state.parentId ?? null : undefined;
+    if (state.mode === "edit") onApply(nextNode, undefined, page);
+    else onApply(nextNode, parentId ?? null, page);
+  };
+
+  return <Dialog open={Boolean(state)} onOpenChange={(open) => { if (!open) onClose(); }}>
+    <DialogContent>
+      <DialogHeader><DialogTitle>{state?.mode === "edit" ? "Настроить маршрут" : state?.mode === "child" ? "Добавить дочерний маршрут" : "Добавить самостоятельный маршрут"}</DialogTitle><DialogDescription>{isRoot ? "Корень задаёт полный URL. Дочерние узлы продолжат его следующими сегментами." : "Укажите один сегмент, который добавится к пути родителя."}</DialogDescription></DialogHeader>
+      <div className="space-y-4">
+        <div className="space-y-1.5"><Label htmlFor="route-value">{isRoot ? "Полный URL" : "Сегмент"}</Label><Input id="route-value" autoFocus value={value} onChange={(event) => { setValue(event.currentTarget.value); if (pageTarget === "__new") setName(suggestedName(event.currentTarget.value)); setError(""); }} placeholder={isRoot ? "/about" : "products, :slug, ~(?<id>[0-9]+), *path"} /><p className="text-xs leading-5 text-muted-foreground">Статический текст · :параметр · ~regex-сегмент · *catch-all. Catch-all может быть только последним.</p></div>
+        <div className="space-y-1.5"><Label htmlFor="route-page">Страница</Label><select id="route-page" className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm" value={pageTarget} onChange={(event) => { setPageTarget(event.currentTarget.value); setError(""); }}><option value="__new">Создать страницу</option>{pageTarget === "__select" && <option value="__select" disabled>Выберите страницу</option>}{state?.mode === "edit" && Boolean(node?.children?.length) && <option value="__none">Оставить узел без страницы</option>}{pages.map((page) => <option key={page.id} value={page.id}>{page.name}</option>)}</select></div>
+        {pageTarget === "__new" && <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_12rem]"><div className="space-y-1.5"><Label htmlFor="route-page-name">Название страницы</Label><Input id="route-page-name" value={name} onChange={(event) => setName(event.currentTarget.value)} /></div><label className="space-y-1.5 text-sm"><span className="font-medium">Тип страницы</span><select className="h-9 w-full rounded-md border border-input bg-background px-3" value={kind} onChange={(event) => setKind(event.currentTarget.value as SitePage["kind"])}><option value="page">Обычная страница</option><option value="collection-list">Список коллекции</option><option value="detail">Карточка записи</option></select></label></div>}
+        {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
+      </div>
+      <DialogFooter><Button type="button" variant="outline" onClick={onClose}>Отмена</Button><Button type="button" onClick={submit}>{state?.mode === "edit" ? "Сохранить маршрут" : "Создать"}</Button></DialogFooter>
+    </DialogContent>
+  </Dialog>;
 }
 
 export default function RouterPage() {
-  const { config, update } = useSiteWorkspace();
-  const [selectedId, setSelectedId] = useState(config.routeTree.id);
-  const [newType, setNewType] = useState<NewNodeType>("static");
+  const { config, update, dirty, saving, conflict, revision, save, reload } = useSiteWorkspace();
+  const [editingPageId, setEditingPageId] = useState<string | null>(null);
+  const [selectedRouteId, setSelectedRouteId] = useState<string | null>(null);
+  const [dialog, setDialog] = useState<RouteDialogState | null>(null);
+  const [menu, setMenu] = useState<ContextState | null>(null);
   const [scale, setScale] = useState(1);
-  const [pan, setPan] = useState({ x: 24, y: 24 });
-  const [dragging, setDragging] = useState<{ pointer: number; x: number; y: number; originX: number; originY: number } | null>(null);
+  const [pan, setPan] = useState({ x: 32, y: 40 });
+  const [panGesture, setPanGesture] = useState<PanState | null>(null);
+  const [connection, setConnection] = useState<ConnectionState | null>(null);
+  const canvasRef = useRef<HTMLDivElement>(null);
+  const hasFit = useRef(false);
   const root = config.routeTree;
-  const selected = findNode(root, selectedId) ?? root;
   const positions = useMemo(() => collectPositions(root), [root]);
-  const byId = new Map(positions.map((item) => [item.node.id, item]));
-  const pages = config.pages;
-  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }));
-  const selectedParent = positions.find((item) => item.node.children?.some((child) => child.id === selected.id))?.node;
+  const routeIds = useMemo(() => new Set(positions.map((position) => position.node.pageId).filter((id): id is string => Boolean(id))), [positions]);
+  const orphanPages = useMemo(() => config.pages.filter((page) => !routeIds.has(page.id)), [config.pages, routeIds]);
+  const maxRouteY = positions.reduce((max, position) => Math.max(max, position.y + position.height), 120);
+  const orphanPositions: OrphanPosition[] = orphanPages.map((page, index) => ({ page, x: 40 + index * (NODE_WIDTH + 28), y: maxRouteY + 92, width: NODE_WIDTH, height: NODE_HEIGHT }));
+  const canvasWidth = Math.max(760, ...positions.map((position) => position.x + position.width + 120), ...orphanPositions.map((position) => position.x + position.width + 80));
+  const canvasHeight = Math.max(540, maxRouteY + (orphanPages.length ? 260 : 120));
+  const positionById = useMemo(() => new Map(positions.map((position) => [position.node.id, position])), [positions]);
+  const descriptors = useMemo(() => describeRoutes(root), [root]);
+  const selectedNode = currentNode(root, menu?.routeId);
 
-  const change = (id: string, values: Partial<RouteTreeNode>) => update((current) => ({
-    ...current,
-    routeTree: updateNode(current.routeTree, id, (node) => ({ ...node, ...values })),
-  }));
+  const fitCanvas = useCallback(() => {
+    const viewport = canvasRef.current;
+    if (!viewport) return;
+    const bounds = viewport.getBoundingClientRect();
+    const availableWidth = Math.max(200, bounds.width - 100);
+    const availableHeight = Math.max(200, bounds.height - 150);
+    const nextScale = Math.max(0.22, Math.min(1.1, availableWidth / canvasWidth, availableHeight / canvasHeight));
+    setScale(nextScale);
+    setPan({
+      x: Math.max(24, (bounds.width - canvasWidth * nextScale) / 2),
+      y: Math.max(86, 90 + (availableHeight - canvasHeight * nextScale) / 2),
+    });
+  }, [canvasWidth, canvasHeight]);
 
-  const addBranch = () => {
-    if (selected.type === "catchAll") return;
-    const id = `route-${crypto.randomUUID().slice(0, 8)}`;
-    const node: RouteTreeNode = {
-      id,
-      type: newType,
-      ...(newType === "static" ? { value: "new" } : {}),
-      ...(newType === "param" ? { name: "slug" } : {}),
-      ...(newType === "regex" ? { pattern: "(?<slug>[a-z0-9-]+)" } : {}),
-      ...(newType === "catchAll" ? { name: "path" } : {}),
-      children: [],
+  useLayoutEffect(() => {
+    if (!hasFit.current && positions.length) {
+      fitCanvas();
+      hasFit.current = true;
+    }
+  }, [fitCanvas, positions.length]);
+
+  useEffect(() => {
+    if (!menu) return;
+    const close = (event: Event) => {
+      if (event.type === "keydown" && (event as KeyboardEvent).key === "Escape") setMenu(null);
+      if (event.type === "pointerdown" && !(event.target as HTMLElement).closest("[data-route-context-menu]")) setMenu(null);
     };
-    change(selected.id, { ...(selected.type === "index" ? {} : { pageId: undefined }), children: [...(selected.children ?? []), node] });
-    setSelectedId(id);
+    document.addEventListener("pointerdown", close);
+    document.addEventListener("keydown", close);
+    return () => { document.removeEventListener("pointerdown", close); document.removeEventListener("keydown", close); };
+  }, [menu]);
+
+  const applyTree = (tree: RouteTreeNode) => update((current) => ({ ...current, routeTree: tree, formatVersion: 3 }));
+  const makeNewRoute = (node: RouteTreeNode, parentId: string | null, page?: SitePage) => {
+    if (page) update((current) => ({ ...current, pages: [...current.pages, page], routeTree: addRouteNode(current.routeTree, parentId, node), formatVersion: 3 }));
+    else applyTree(addRouteNode(root, parentId, node));
+    setSelectedRouteId(node.id);
+    if (page) setEditingPageId(page.id);
+    setDialog(null);
   };
 
-  const reorderBranches = (event: DragEndEvent) => {
-    if (!event.over || event.active.id === event.over.id || !selectedParent) return;
-    const children = [...(selectedParent.children ?? [])];
-    const from = children.findIndex((child) => child.id === event.active.id);
-    const to = children.findIndex((child) => child.id === event.over?.id);
-    if (from < 0 || to < 0) return;
-    update((current) => ({ ...current, routeTree: updateNode(current.routeTree, selectedParent.id, (node) => ({ ...node, children: arrayMove(children, from, to) })) }));
+  const applyRouteEdit = (node: RouteTreeNode, _parentId: null, page?: SitePage) => {
+    update((current) => ({
+      ...current,
+      pages: page ? [...current.pages, page] : current.pages,
+      routeTree: updateRouteNode(current.routeTree, node.id, () => node),
+      formatVersion: 3,
+    }));
+    setDialog(null);
+    setMenu(null);
+    if (page) setEditingPageId(page.id);
   };
 
-  const canvasPointerDown = (event: PointerEvent<HTMLDivElement>) => {
-    if ((event.target as HTMLElement).closest("button")) return;
-    event.currentTarget.setPointerCapture(event.pointerId);
-    setDragging({ pointer: event.pointerId, x: event.clientX, y: event.clientY, originX: pan.x, originY: pan.y });
+  const openPageForRoute = (node: RouteTreeNode) => {
+    let pageId = node.pageId;
+    if (!pageId) {
+      const descriptor = descriptors.find((route) => route.id === node.id);
+      const page = createPageFromRoute(node, descriptor?.path ?? "/");
+      pageId = page.id;
+      update((current) => ({
+        ...current,
+        pages: [...current.pages, page],
+        routeTree: updateRouteNode(current.routeTree, node.id, (currentNode) => ({ ...currentNode, pageId: page.id })),
+        formatVersion: 3,
+      }));
+    }
+    setSelectedRouteId(node.id);
+    setMenu(null);
+    setEditingPageId(pageId);
   };
-  const canvasPointerMove = (event: PointerEvent<HTMLDivElement>) => {
-    if (!dragging || dragging.pointer !== event.pointerId) return;
-    setPan({ x: dragging.originX + event.clientX - dragging.x, y: dragging.originY + event.clientY - dragging.y });
-  };
-  const canvasPointerUp = (event: PointerEvent<HTMLDivElement>) => {
-    if (dragging?.pointer === event.pointerId) setDragging(null);
-  };
-  const canvasWheel = (event: WheelEvent<HTMLDivElement>) => {
-    if (!event.ctrlKey && !event.metaKey) return;
+
+  const contextMenu = (event: ReactMouseEvent, routeId?: string, pageId?: string) => {
     event.preventDefault();
-    setScale((current) => Math.max(0.55, Math.min(1.5, current + (event.deltaY < 0 ? 0.08 : -0.08))));
+    event.stopPropagation();
+    const bounds = canvasRef.current?.getBoundingClientRect();
+    if (!bounds) return;
+    setMenu({ x: Math.max(8, Math.min(event.clientX - bounds.left, bounds.width - 250)), y: Math.max(8, Math.min(event.clientY - bounds.top, bounds.height - 250)), routeId, pageId });
   };
 
-  const pathFor = (node: RouteTreeNode) => byId.get(node.id)?.path ?? "/";
-  const pageName = (pageId?: string) => pages.find((page) => page.id === pageId)?.name;
+  const openChildDialog = (parentId: string) => { setDialog({ mode: "child", parentId }); setMenu(null); };
+  const openRootDialog = (existingPageId?: string, chooseExisting = false) => { setDialog({ mode: "root", existingPageId, chooseExisting }); setMenu(null); };
+  const editRouteDialog = (node: RouteTreeNode) => { setDialog({ mode: "edit", routeId: node.id }); setMenu(null); };
 
-  return (
-    <div className="space-y-4">
-      <div className="flex flex-wrap items-end justify-between gap-3">
-        <div><h2 className="text-xl font-semibold tracking-tight">Роутер</h2><p className="mt-1 text-sm text-muted-foreground">Стройте URL как дерево. Порядок соседних ветвей задаёт приоритет совпадения.</p></div>
-        <div className="flex items-center gap-2 rounded-md border border-border bg-card p-1">
-          <Button type="button" variant="ghost" size="icon-sm" aria-label="Уменьшить" onClick={() => setScale((v) => Math.max(0.55, v - 0.1))}><ZoomOut /></Button>
-          <span className="w-12 text-center text-xs tabular-nums">{Math.round(scale * 100)}%</span>
-          <Button type="button" variant="ghost" size="icon-sm" aria-label="Увеличить" onClick={() => setScale((v) => Math.min(1.5, v + 0.1))}><ZoomIn /></Button>
-          <Button type="button" variant="ghost" size="icon-sm" aria-label="Сбросить масштаб и позицию" onClick={() => { setScale(1); setPan({ x: 24, y: 24 }); }}><RouteIcon /></Button>
+  const deleteBranch = (node: RouteTreeNode) => {
+    const descendants = positions.filter((position) => position.node.id === node.id || isDescendant(root, node.id, position.node.id)).length;
+    const removedIds = new Set(positions.filter((position) => position.node.id === node.id || isDescendant(root, node.id, position.node.id)).map((position) => position.node.id));
+    const remainsRouted = positions.some((position) => !removedIds.has(position.node.id) && Boolean(position.node.pageId));
+    if (!remainsRouted) { toast.error("Нельзя удалить последний маршрут сайта."); return; }
+    if (!window.confirm(descendants > 1 ? `Удалить маршрут «${descriptors.find((route) => route.id === node.id)?.path}» и ${descendants - 1} дочерних маршрутов? Страницы останутся в черновиках без маршрута.` : `Удалить маршрут «${descriptors.find((route) => route.id === node.id)?.path}»? Страница останется в черновиках без маршрута.`)) return;
+    applyTree(removeRouteBranch(root, node.id));
+    setSelectedRouteId(null);
+    setMenu(null);
+  };
+
+  const changeParent = (sourceId: string, targetId: string | null) => {
+    const result = reparentRoute(root, sourceId, targetId);
+    if (!result.tree) { toast.error(result.error ?? "Не удалось соединить маршруты"); return; }
+    applyTree(result.tree);
+    setMenu(null);
+  };
+
+  const openPageForOrphan = (pageId: string) => { setEditingPageId(pageId); setMenu(null); };
+
+  const onCanvasPointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (event.button !== 0) return;
+    if ((event.target as HTMLElement).closest("button, [data-route-id], input, [role=menu]")) return;
+    event.currentTarget.setPointerCapture(event.pointerId);
+    setPanGesture({ pointerId: event.pointerId, clientX: event.clientX, clientY: event.clientY, originX: pan.x, originY: pan.y });
+    setMenu(null);
+  };
+  const onCanvasPointerMove = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (panGesture?.pointerId === event.pointerId) setPan({ x: panGesture.originX + event.clientX - panGesture.clientX, y: panGesture.originY + event.clientY - panGesture.clientY });
+    if (connection?.pointerId === event.pointerId) setConnection({ ...connection, clientX: event.clientX, clientY: event.clientY });
+  };
+  const onCanvasPointerUp = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (panGesture?.pointerId === event.pointerId) setPanGesture(null);
+    if (connection?.pointerId === event.pointerId) {
+      const hit = document.elementFromPoint(event.clientX, event.clientY)?.closest<HTMLElement>("[data-route-id]");
+      const targetId = hit?.dataset.routeId ?? null;
+      if (targetId === connection.sourceId) setConnection(null);
+      else { setConnection(null); changeParent(connection.sourceId, targetId); }
+    }
+  };
+  const onCanvasWheel = (event: ReactWheelEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    const direction = event.deltaY < 0 ? 1 : -1;
+    setScale((current) => Math.max(0.22, Math.min(1.5, current + direction * 0.06)));
+  };
+
+  if (editingPageId) return <PageEditorPage pageId={editingPageId} onBack={() => setEditingPageId(null)} />;
+
+  const source = connection ? positionById.get(connection.sourceId) : undefined;
+  const connectionPoint = connection && canvasRef.current ? (() => {
+    const bounds = canvasRef.current!.getBoundingClientRect();
+    return { x: (connection.clientX - bounds.left - pan.x) / scale, y: (connection.clientY - bounds.top - pan.y) / scale };
+  })() : null;
+  const pathRootCount = root.children?.length ?? 0;
+
+  return <div className="relative h-full min-h-0 overflow-hidden bg-background" onContextMenu={(event) => { if (!(event.target as HTMLElement).closest("[data-route-id], [data-route-context-menu], button, input, [role=dialog]")) contextMenu(event); }}>
+    <div className="absolute inset-0" data-route-canvas ref={canvasRef} onPointerDown={onCanvasPointerDown} onPointerMove={onCanvasPointerMove} onPointerUp={onCanvasPointerUp} onPointerCancel={onCanvasPointerUp} onWheel={onCanvasWheel} style={{ cursor: panGesture ? "grabbing" : connection ? "crosshair" : "grab", touchAction: "none" }}>
+      <div aria-hidden="true" className="pointer-events-none absolute inset-0 opacity-65" style={{ backgroundImage: "radial-gradient(hsl(var(--border)) .75px, transparent .75px)", backgroundSize: "24px 24px" }} />
+      <div className="absolute left-3 right-3 top-3 z-20 flex flex-wrap items-center justify-between gap-2 sm:left-5 sm:right-5 sm:top-5" onContextMenu={(event) => event.stopPropagation()}>
+        <div className="flex min-w-0 items-center gap-2 rounded-lg border border-border bg-card/95 px-3 py-2 shadow-sm backdrop-blur-sm">
+          <GitBranch className="size-4 shrink-0 text-primary" />
+          <div className="min-w-0"><h1 className="truncate text-sm font-semibold">Страницы и маршруты</h1><p className="hidden text-xs text-muted-foreground sm:block">{pathRootCount} корневых маршрута · {positions.length} узлов · ревизия {revision}</p></div>
+          <span className={`ml-1 flex shrink-0 items-center gap-1 rounded-full px-2 py-1 text-xs ${dirty ? "bg-amber-500/10 text-amber-700 dark:text-amber-300" : "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"}`}><span className={`size-1.5 rounded-full ${dirty ? "bg-amber-500" : "bg-emerald-500"}`} />{dirty ? "Изменено" : "Сохранено"}</span>
+          {conflict && <span className="hidden items-center gap-1 text-xs text-destructive md:flex"><AlertTriangle className="size-3.5" />Черновик изменился</span>}
+        </div>
+        <div className="flex items-center gap-1 rounded-lg border border-border bg-card/95 p-1 shadow-sm backdrop-blur-sm">
+          <Button type="button" size="sm" variant="ghost" className="px-2 sm:px-3" onClick={() => openRootDialog()} aria-label="Добавить корневой маршрут"><Plus /><span className="hidden sm:inline">Корневой маршрут</span></Button>
+          <span className="mx-1 h-5 border-l border-border" />
+          <Button type="button" size="icon-sm" variant="ghost" aria-label="Уменьшить масштаб" onClick={() => setScale((current) => Math.max(0.22, current - 0.1))}><ZoomOut /></Button>
+          <span className="w-10 text-center text-xs tabular-nums text-muted-foreground">{Math.round(scale * 100)}%</span>
+          <Button type="button" size="icon-sm" variant="ghost" aria-label="Увеличить масштаб" onClick={() => setScale((current) => Math.min(1.5, current + 0.1))}><ZoomIn /></Button>
+          <Button type="button" size="icon-sm" variant="ghost" aria-label="Вписать маршруты в окно" onClick={fitCanvas}><Maximize2 /></Button>
+          <Button type="button" size="sm" className="px-2 sm:px-3" aria-label={saving ? "Сохраняем черновик" : dirty ? "Сохранить черновик" : "Черновик сохранён"} title={saving ? "Сохраняем черновик" : dirty ? "Сохранить черновик" : "Черновик сохранён"} onClick={() => void save()} disabled={!dirty || saving}>{dirty ? <Save /> : <Check />}<span className="hidden sm:inline">{saving ? "Сохраняем…" : dirty ? "Сохранить" : "Сохранено"}</span></Button>
+          {conflict && <Button type="button" size="icon-sm" variant="outline" aria-label="Загрузить актуальный черновик" disabled={saving} onClick={() => void reload()}><ArrowUp /></Button>}
         </div>
       </div>
 
-      <div className="grid min-h-[570px] overflow-hidden rounded-lg border border-border bg-card xl:grid-cols-[minmax(0,1fr)_330px]">
-        <div className="relative min-h-[570px] overflow-hidden bg-muted/15" onPointerDown={canvasPointerDown} onPointerMove={canvasPointerMove} onPointerUp={canvasPointerUp} onPointerCancel={canvasPointerUp} onWheel={canvasWheel} style={{ cursor: dragging ? "grabbing" : "grab", touchAction: "none" }}>
-          <div className="absolute inset-0 opacity-60" style={{ backgroundImage: "radial-gradient(hsl(var(--border)) 0.8px, transparent 0.8px)", backgroundSize: "22px 22px" }} />
-          <div className="absolute left-4 top-4 z-10 flex items-center gap-2 rounded-md border border-border bg-background/90 px-2.5 py-1.5 text-xs text-muted-foreground"><Code2 className="size-3.5" />Перетаскивайте пустое поле · Ctrl/⌘ + колесо — масштаб</div>
-          <div className="absolute left-0 top-0 origin-top-left" style={{ transform: `translate(${pan.x}px, ${pan.y}px) scale(${scale})` }}>
-            <svg className="pointer-events-none absolute left-0 top-0 overflow-visible" width={Math.max(760, ...positions.map((item) => item.x + item.width + 100))} height={Math.max(620, ...positions.map((item) => item.y + item.height + 80))} aria-hidden="true">
-              {positions.flatMap((parent) => (parent.node.children ?? []).map((child) => {
-                const target = byId.get(child.id);
-                if (!target) return null;
-                const startX = parent.x + parent.width;
-                const startY = parent.y + parent.height / 2;
-                const endX = target.x;
-                const endY = target.y + target.height / 2;
-                const middle = (startX + endX) / 2;
-                return <path key={child.id} d={`M ${startX} ${startY} C ${middle} ${startY}, ${middle} ${endY}, ${endX} ${endY}`} fill="none" stroke="hsl(var(--border))" strokeWidth="2" />;
-              }))}
-            </svg>
-            {positions.map(({ node, path, ...position }) => (
-              <button type="button" key={node.id} onClick={() => setSelectedId(node.id)} style={{ left: position.x, top: position.y, width: position.width, height: position.height }} className={`absolute rounded-md border bg-card px-3 py-2 text-left shadow-sm transition-colors ${selectedId === node.id ? "border-primary ring-2 ring-primary/15" : "border-border hover:border-primary/50"}`}>
-                <span className="flex items-center justify-between gap-2"><span className="truncate text-sm font-medium">{node.type === "index" ? "/" : childSegment(node)}</span><span className="shrink-0 text-[10px] text-muted-foreground">{node.type}</span></span>
-                <span className="mt-1 block truncate text-xs text-muted-foreground">{pageName(node.pageId) ?? path}</span>
-              </button>
-            ))}
-          </div>
-        </div>
-
-        <aside className="flex min-w-0 flex-col border-t border-border xl:border-l xl:border-t-0">
-          <div className="border-b border-border px-4 py-3"><h3 className="font-medium">Свойства узла</h3><p className="mt-1 truncate text-xs text-muted-foreground">{pathFor(selected)}</p></div>
-          <div className="flex-1 space-y-4 overflow-y-auto p-4">
-            <div><p className="text-sm font-medium">{routeTypeName(selected.type)}</p><p className="mt-1 text-xs text-muted-foreground">ID: {selected.id}</p></div>
-            {selected.type === "static" && <div className="space-y-1.5"><Label>Сегмент URL</Label><Input value={selected.value ?? ""} onChange={(event) => change(selected.id, { value: event.currentTarget.value })} /></div>}
-            {(selected.type === "param" || selected.type === "catchAll") && <div className="space-y-1.5"><Label>Имя параметра</Label><Input value={selected.name ?? ""} onChange={(event) => change(selected.id, { name: event.currentTarget.value })} placeholder={selected.type === "catchAll" ? "path" : "slug"} /><p className="text-xs text-muted-foreground">Фича сможет получить это значение как аргумент из пути.</p></div>}
-            {selected.type === "regex" && <div className="space-y-1.5"><Label>Regex одного сегмента</Label><Input value={selected.pattern ?? ""} onChange={(event) => change(selected.id, { pattern: event.currentTarget.value })} placeholder="(?&lt;id&gt;[0-9]+)" /><p className="text-xs text-muted-foreground">Именованные группы, например <code>(?&lt;id&gt;[0-9]+)</code>, становятся path-параметрами. Сегмент не может включать /.</p></div>}
-            {(selected.type === "index" || (selected.children ?? []).length === 0) ? <div className="space-y-1.5"><Label>{selected.type === "index" ? "Страница корня" : "Страница маршрута"}</Label><select className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm" value={selected.pageId ?? ""} onChange={(event) => change(selected.id, { pageId: event.currentTarget.value || undefined })}><option value="">Без страницы</option>{pages.map((page) => <option key={page.id} value={page.id}>{page.name}</option>)}</select></div> : <p className="rounded-md bg-muted/50 p-2 text-xs text-muted-foreground">Промежуточная ветвь. Страницу назначьте одному из её листьев.</p>}
-            {selected.type !== "catchAll" && <div className="space-y-2 border-t border-border pt-3">
-              <div className="flex items-center justify-between gap-2"><div><h4 className="text-sm font-medium">Следующие сегменты</h4><p className="text-xs text-muted-foreground">Верхняя ветвь проверяется первой.</p></div></div>
-              <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={reorderBranches}>
-                <SortableContext items={(selected.children ?? []).map((child) => child.id)} strategy={verticalListSortingStrategy}>
-                  <div className="space-y-1">{(selected.children ?? []).map((child) => <SortableBranch key={child.id} node={child} pageName={pageName(child.pageId)} selected={selectedId === child.id} onSelect={() => setSelectedId(child.id)} />)}</div>
-                </SortableContext>
-              </DndContext>
-              <div className="flex gap-2"><select className="h-9 min-w-0 flex-1 rounded-md border border-input bg-background px-2 text-sm" value={newType} onChange={(event) => setNewType(event.currentTarget.value as NewNodeType)}><option value="static">Статический</option><option value="param">Параметр</option><option value="regex">Regex</option><option value="catchAll">Catch-all</option></select><Button type="button" size="sm" variant="outline" onClick={addBranch}><Plus />Добавить</Button></div>
-            </div>}
-            {selected.type !== "index" && <Button type="button" variant="outline" size="sm" className="w-full text-destructive" onClick={() => { update((current) => ({ ...current, routeTree: removeNode(current.routeTree, selected.id) })); setSelectedId(selectedParent?.id ?? root.id); }}><Trash2 />Удалить ветвь</Button>}
-            {selectedParent && selectedParent.children && selectedParent.children.length > 1 && <div className="flex gap-2"><Button type="button" variant="outline" size="sm" className="flex-1" disabled={selectedParent.children[0]?.id === selected.id} onClick={() => { const children = [...selectedParent.children!]; const at = children.findIndex((item) => item.id === selected.id); if (at > 0) update((current) => ({ ...current, routeTree: updateNode(current.routeTree, selectedParent.id, (node) => ({ ...node, children: arrayMove(children, at, at - 1) })) })); }}><ArrowUp />Приоритет выше</Button><Button type="button" variant="outline" size="sm" className="flex-1" disabled={selectedParent.children.at(-1)?.id === selected.id} onClick={() => { const children = [...selectedParent.children!]; const at = children.findIndex((item) => item.id === selected.id); if (at < children.length - 1) update((current) => ({ ...current, routeTree: updateNode(current.routeTree, selectedParent.id, (node) => ({ ...node, children: arrayMove(children, at, at + 1) })) })); }}><ArrowDown />Приоритет ниже</Button></div>}
-          </div>
-          <div className="border-t border-border p-4 text-xs leading-5 text-muted-foreground">Маршруты одной страницы должны иметь одинаковые имена path-параметров. Regex исполняется с ограничением времени.</div>
-        </aside>
+      <div className="pointer-events-none absolute bottom-4 left-4 z-10 max-w-[calc(100vw-2rem)] rounded-md border border-border bg-card/90 px-3 py-2 text-xs text-muted-foreground shadow-sm backdrop-blur-sm sm:bottom-5 sm:left-5">
+        ПКМ — действия · перетащите кружок к узлу, чтобы вложить маршрут · отпустите в пустом месте, чтобы отделить
       </div>
-      <Card><CardHeader className="pb-3"><CardTitle className="text-base">Как читается дерево</CardTitle><CardDescription>Каждый узел описывает один сегмент URL; ветви обходятся сверху вниз.</CardDescription></CardHeader><CardContent className="flex flex-wrap gap-x-5 gap-y-2 text-xs text-muted-foreground">{["/ — корень сайта", "feed — точный сегмент", ":slug — один сегмент и path-параметр", "[regex] — проверка одного сегмента", "*path — остаток пути целиком"].map((item) => <span key={item} className="flex items-center gap-1.5"><Minus className="size-3" />{item}</span>)}</CardContent></Card>
+
+      <div className="absolute left-0 top-0 origin-top-left" style={{ transform: `translate(${pan.x}px, ${pan.y}px) scale(${scale})`, width: canvasWidth, height: canvasHeight }}>
+        <svg className="pointer-events-none absolute inset-0 overflow-visible" width={canvasWidth} height={canvasHeight} aria-hidden="true">
+          <defs><marker id="route-arrow" markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto"><path d="M 0 0 L 9 4.5 L 0 9 z" fill="hsl(var(--primary))" /></marker></defs>
+          {positions.flatMap((parent) => (parent.node.children ?? []).map((child) => {
+            const target = positionById.get(child.id);
+            if (!target) return null;
+            const startX = parent.x + parent.width;
+            const startY = parent.y + parent.height / 2;
+            const endX = target.x;
+            const endY = target.y + target.height / 2;
+            const control = Math.max(44, (endX - startX) * 0.45);
+            return <path key={`${parent.node.id}-${child.id}`} d={`M ${startX} ${startY} C ${startX + control} ${startY}, ${endX - control} ${endY}, ${endX} ${endY}`} fill="none" stroke="hsl(var(--primary) / .48)" strokeWidth="2" markerEnd="url(#route-arrow)" />;
+          }))}
+          {connection && source && connectionPoint && <path d={`M ${source.x + source.width} ${source.y + source.height / 2} C ${source.x + source.width + 70} ${source.y + source.height / 2}, ${connectionPoint.x - 60} ${connectionPoint.y}, ${connectionPoint.x} ${connectionPoint.y}`} fill="none" stroke="hsl(var(--primary))" strokeWidth="2.5" strokeDasharray="7 6" />}
+        </svg>
+
+        {positions.map((position) => {
+          const node = position.node;
+          const label = pageName(config.pages, node.pageId);
+          const childCount = node.children?.length ?? 0;
+          return <div key={node.id} data-route-id={node.id} onContextMenu={(event) => contextMenu(event, node.id)} className="absolute" style={{ left: position.x, top: position.y, width: position.width, height: position.height }}>
+            <button type="button" onClick={() => openPageForRoute(node)} aria-label={`Открыть страницу ${label ?? position.path}`} className={`group flex h-full w-full flex-col justify-between rounded-lg border bg-card px-3.5 py-3 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${selectedRouteId === node.id ? "border-primary ring-2 ring-primary/20" : "border-border hover:border-primary/60"}`}>
+              <span className="flex min-w-0 items-center gap-2">
+                <span className="flex size-7 shrink-0 items-center justify-center rounded-md bg-primary/10 text-primary">{position.path === "/" ? <Home className="size-4" /> : <GitBranch className="size-4" />}</span>
+                <code className="min-w-0 flex-1 truncate text-sm font-semibold text-foreground">{position.path}</code>
+                <span className="shrink-0 rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">{displayNodeType(node)}</span>
+              </span>
+              <span className="flex items-end justify-between gap-2 pl-9">
+                <span className="min-w-0 truncate text-sm text-muted-foreground">{label ?? "Страница не назначена"}</span>
+                <span className="shrink-0 text-xs tabular-nums text-muted-foreground">{config.pages.find((page) => page.id === node.pageId)?.placements.length ?? 0} фич</span>
+              </span>
+              {childCount > 0 && <span className="absolute -bottom-5 left-9 text-[10px] text-muted-foreground">{childCount} дочерн. {childCount === 1 ? "маршрут" : "маршрута"}</span>}
+            </button>
+            <button type="button" aria-label={`Соединить ${position.path} с дочерним маршрутом`} title="Перетащите, чтобы вложить маршрут" onPointerDown={(event) => { if (event.button !== 0) return; event.stopPropagation(); const canvas = event.currentTarget.closest("[data-route-canvas]"); if (canvas instanceof HTMLDivElement) canvas.setPointerCapture(event.pointerId); setConnection({ pointerId: event.pointerId, sourceId: node.id, clientX: event.clientX, clientY: event.clientY }); }} className="absolute -right-2.5 top-1/2 z-10 flex size-5 -translate-y-1/2 items-center justify-center rounded-full border-2 border-card bg-primary text-primary-foreground shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"><span className="size-1.5 rounded-full bg-current" /></button>
+            <button type="button" aria-label={`ПКМ: действия маршрута ${position.path}`} onContextMenu={(event) => contextMenu(event, node.id)} className="sr-only">Действия</button>
+          </div>;
+        })}
+
+        {orphanPositions.map(({ page, x, y, width, height }) => <div key={`page-${page.id}`} className="absolute" style={{ left: x, top: y, width, height }} onContextMenu={(event) => contextMenu(event, undefined, page.id)}>
+          <button type="button" onClick={() => openPageForOrphan(page.id)} className="flex h-full w-full flex-col justify-between rounded-lg border border-dashed border-warning/50 bg-card/90 px-3.5 py-3 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+            <span className="flex items-center gap-2"><span className="flex size-7 items-center justify-center rounded-md bg-warning/10 text-warning"><FilePlus2 className="size-4" /></span><span className="text-xs text-warning">Без маршрута</span></span>
+            <span className="truncate pl-9 text-sm font-medium">{page.name}</span>
+          </button>
+          <button type="button" aria-label={`Открыть действия страницы ${page.name}`} onContextMenu={(event) => contextMenu(event, undefined, page.id)} className="sr-only">Действия</button>
+        </div>)}
+      </div>
     </div>
-  );
+
+    {menu && <div data-route-context-menu role="menu" className="absolute z-40 min-w-56 rounded-md border border-border bg-popover p-1 text-popover-foreground shadow-lg" style={{ left: menu.x, top: menu.y }}>
+      {menu.routeId ? <>
+        <MenuAction onClick={() => selectedNode && openPageForRoute(selectedNode)}>Открыть страницу</MenuAction>
+        <MenuAction onClick={() => openChildDialog(menu.routeId!)} disabled={selectedNode?.type === "catchAll" || (selectedNode?.type === "path" && selectedNode.path?.split("/").filter(Boolean).at(-1)?.startsWith("*"))}><Plus className="size-4" />Добавить дочерний</MenuAction>
+        <MenuAction onClick={() => selectedNode && editRouteDialog(selectedNode)}>Изменить URL и страницу</MenuAction>
+        {descriptors.find((route) => route.id === menu.routeId)?.parentId && <MenuAction onClick={() => changeParent(menu.routeId!, null)}><Link2 className="size-4" />Отсоединить в корень</MenuAction>}
+        <div className="my-1 border-t border-border" />
+        {(() => {
+          const parentId = descriptors.find((route) => route.id === menu.routeId)?.parentId;
+          const siblingIds = (parentId ? currentNode(root, parentId)?.children : root.children)?.map((node) => node.id) ?? [];
+          const index = siblingIds.indexOf(menu.routeId!);
+          return <>
+            <MenuAction disabled={index <= 0} onClick={() => { applyTree(moveRoutePriority(root, menu.routeId!, -1)); setMenu(null); }}><ArrowUp className="size-4" />Выше приоритетом</MenuAction>
+            <MenuAction disabled={index < 0 || index === siblingIds.length - 1} onClick={() => { applyTree(moveRoutePriority(root, menu.routeId!, 1)); setMenu(null); }}><ArrowDown className="size-4" />Ниже приоритетом</MenuAction>
+          </>;
+        })()}
+        <MenuAction className="text-destructive" onClick={() => selectedNode && deleteBranch(selectedNode)}><Trash2 className="size-4" />Удалить ветвь</MenuAction>
+      </> : menu.pageId ? <>
+        <MenuAction onClick={() => openPageForOrphan(menu.pageId!)}>Редактировать страницу</MenuAction>
+        <MenuAction onClick={() => openRootDialog(menu.pageId)}><Plus className="size-4" />Создать для неё маршрут</MenuAction>
+      </> : <>
+        <MenuAction onClick={() => openRootDialog()}><Plus className="size-4" />Новая самостоятельная страница</MenuAction>
+        <MenuAction onClick={() => openRootDialog(undefined, true)}><Link2 className="size-4" />Добавить маршрут к существующей</MenuAction>
+      </>}
+    </div>}
+
+    <RouteDialog key={`${dialog?.mode ?? "closed"}-${dialog?.routeId ?? dialog?.parentId ?? "root"}`} state={dialog} pages={config.pages} tree={root} onClose={() => setDialog(null)} onApply={(route, parentId, page) => {
+      if (dialog?.mode === "edit") applyRouteEdit(route, null, page);
+      else makeNewRoute(route, parentId ?? null, page);
+    }} />
+  </div>;
+}
+
+function isDescendant(tree: RouteTreeNode, ancestorId: string, id: string): boolean {
+  const ancestor = currentNode(tree, ancestorId);
+  const contains = (node: RouteTreeNode): boolean => node.id === id || (node.children ?? []).some(contains);
+  return Boolean(ancestor?.children?.some(contains));
 }

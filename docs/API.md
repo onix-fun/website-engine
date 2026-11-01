@@ -320,7 +320,7 @@ CSV-экспорт учитывает те же фильтры, значения
 
 ## Сайт: релизы и среды
 
-Новый runtime сайта публикуется feature builds и снапшотами через `/api/v2/admin`; полный контракт описан в [docs/FEATURE_SNAPSHOTS.md](FEATURE_SNAPSHOTS.md). Старые routes загрузки целого сайта и git-источников оставлены только на переходный период и не используются runtime-ом. Настройки доменов, TLS и CORS продолжают обслуживаться API сред.
+Новый runtime сайта публикуется feature builds и снапшотами через `/api/v2/admin`; полный контракт описан в [docs/FEATURE_SNAPSHOTS.md](FEATURE_SNAPSHOTS.md). Старые routes загрузки целого сайта и git-источников оставлены только на переходный период и не используются runtime-ом. API сред обслуживает CORS allow-list и публичный base URL.
 
 ### Feature builds и snapshots (новый runtime)
 
@@ -329,12 +329,22 @@ CSV-экспорт учитывает те же фильтры, значения
 | GET | `/api/v2/admin/feature-builds` | user | Неизменяемые сборки фич |
 | POST | `/api/v2/admin/feature-builds` | staff | Импорт ESM ZIP-архива с `manifest.json` |
 | GET/PUT | `/api/v2/admin/site/draft` | user/staff | Читать и сохранять визуальную композицию по revision |
+| GET/PUT | `/api/v2/admin/site/design-system` | admin, moderator | Читать/сохранять типизированный черновик темы по revision |
+| POST | `/api/v2/admin/site/design-system/preview` | admin, moderator | Создать краткоживущий токен предпросмотра несохранённой темы |
 | GET | `/api/v2/admin/site/snapshots` | user | История и активные указатели dev/prod |
 | POST | `/api/v2/admin/site/snapshots` | staff | Создать снапшот и переключить dev |
 | POST | `/api/v2/admin/site/snapshots/{id}/promote` | admin | Продвинуть тот же снапшот в prod |
 | POST | `/api/v2/admin/site/snapshots/{id}/rollback` | admin | Вернуть dev или prod на снапшот |
 
-Публичный runtime использует `GET /api/v2/runtime?path=...`, коллекции — `/api/v2/content/{key}/records`, формы — `POST /api/v2/forms/{key}/submissions`. Данные runtime и версии фич берутся из активного снапшота.
+Публичный runtime использует `GET /api/v2/runtime?path=...`, коллекции — `/api/v2/content/{key}/records`, формы — `POST /api/v2/forms/{key}/submissions`. Данные runtime, версии фич и дизайн-система берутся из активного снапшота.
+
+Каждая композиция может вернуть `themeStyleUrl` и `systemAssets.logoUrl`. Runtime загружает тему до показа фич. Неизменяемая тема снапшота доступна через `GET /api/v2/site-themes/snapshots/{snapshotId}`; CSS предпросмотра — через `/api/v2/site-themes/previews/{token}`. Общий логотип и шрифты WOFF2 выдаются через `GET /api/v2/system-assets/{mediaId}`. URL системных файлов same-origin, с CORS для публичных сред и долгим immutable-кешем. Старые снапшоты без `designSystem` продолжают использовать стили своих feature builds.
+
+В дизайн-систему загружаются WOFF2-файлы шрифтов, в том числе variable-шрифты. Для частей одного семейства можно указывать разные `unicodeRange`; семейство, вес, стиль и диапазон символов сериализуются в `@font-face`. ID выбранных файлов и `brandLogoMediaId` проверяются по существующим готовым медиаобъектам. Их нельзя удалить, пока на них ссылается черновик или сохранённый снапшот.
+
+Фон страницы задаётся как обязательный media-аргумент размещения фичи `background`. Поэтому разные страницы могут выбрать разные изображения. Поля `format: "media"` с `x-media` подготавливаются по профилю указанной версии сборки; для аргументов профиль можно запросить с `schemaKind=arguments` и `buildVersion`.
+
+Снапшот включает `designSystemRevision` и значения `designSystem`, включая ID шрифтов и общего логотипа. Сохранение темы само по себе не меняет опубликованный сайт: новая тема применяется после публикации снапшота, а предпросмотр использует отдельный краткоживущий `__designPreview` token.
 
 Неизменяемые zip-артефакты сайта выкатываются в две среды (`dev`, `prod`);
 legacy API ниже оставлен на переходный период.
@@ -375,15 +385,12 @@ PATCH — optimistic concurrency: в теле передаётся актуал�
   "revision": 4,
   "name": "Продакшен",
   "public_base_url": "https://example.com",
-  "domains": ["example.com", "www.example.com"],
-  "cors_origins": ["https://app.example"],
-  "tls_enabled": false
+  "cors_origins": ["https://app.example"]
 }
 ```
 
-Ошибки полей приходят кодом 400 (`validation_failed`); при конфликтующих
-доменах между средами — 400 с пояснением. Изменения CORS применяются без
-перезапуска.
+Ошибки полей приходят кодом 400 (`validation_failed`). Изменения CORS
+применяются без перезапуска.
 
 ### Источники релизов
 
@@ -427,7 +434,7 @@ PATCH — optimistic concurrency: в теле передаётся актуал�
     "cors_origins": ["https://site.example"]
   },
   "media": {
-    "accepted_types": ["image/jpeg", "image/png", "image/gif", "image/webp", "application/pdf", "video/mp4"],
+    "accepted_types": ["image/jpeg", "image/png", "image/gif", "image/webp", "image/svg+xml", "application/pdf", "video/mp4"],
     "max_upload_bytes": 20971520,
     "image_variants": ["original", "thumbnail", "medium", "large"]
   },
@@ -459,16 +466,29 @@ PATCH — optimistic concurrency: в теле передаётся актуал�
 | POST | `/admin/media/{id}/retry` | staff |
 | DELETE | `/admin/media/{id}` | staff |
 | GET | `/media/{id}?variant=thumbnail` | публичный, 302 |
+| POST | `/api/v2/admin/media/{id}/renditions/prepare` | user, поставить профиль фичи в очередь |
+| GET | `/api/v2/admin/media/{id}/renditions/state?featureKey=&schemaKind=&fieldPath=&buildDigest=` | user, состояние обработки поля |
 
-Допустимые типы: JPEG, PNG, GIF, WebP, PDF, MP4. Лимит по умолчанию 20 MiB
-(`MAX_UPLOAD_BYTES`). Изображения получают варианты `thumbnail` (320), `medium` (960),
-`large` (1600), а также `original`. PDF/MP4 хранятся как оригинал. GIF/PNG/WebP variants
-кодируются в PNG, JPEG — в JPEG. Видео-транскодирование не выполняется.
+Допустимые типы: JPEG, PNG, GIF, WebP, безопасный SVG, PDF, MP4. Лимит по умолчанию 20 MiB
+(`MAX_UPLOAD_BYTES`). Новая загрузка сохраняет оригинал и сразу показывает его в медиатеке.
+Варианты для runtime ABI 2 создаются отдельно по профилям `x-media` в manifest; для
+статичных JPEG/PNG/WebP движок создаёт WebP, для видео — H.264 MP4 и WebP poster.
+GIF, SVG, PDF и анимированные WebP остаются оригиналами. Общие варианты старых загрузок
+и URL с `?variant=` сохраняются для совместимости со снапшотами ABI 1.
 
 `GET /media/{id}` ищет объект в БД, проверяет статус `ready` и отвечает `302 Found` с
 `Location` на публичный URL S3. URL строится только из ключей, сохранённых в БД,
 поэтому открытый редирект невозможен. Переменная `variant` ограничена ключами
-`variants.json`; по умолчанию используется `original`.
+`variants.json`; по умолчанию используется `original`. Рендишены ABI 2 выдаются по
+`/media/{id}?profile=<sha256>&variant=<name>`; публичный URL строится из ключа в БД.
+
+`POST /api/v2/admin/media/{id}/renditions/prepare` принимает JSON с `featureKey`,
+`schemaKind` (`content` или `settings`), JSON Pointer `fieldPath` и `buildDigest`. Движок
+сам находит профиль в манифесте активного dev-снапшота, поэтому клиент не передаёт и не
+редактирует параметры обработки. Ответ содержит `status: pending|processing|ready|failed`;
+задачи хранятся в PostgreSQL, повторяются после истечения lease и могут быть запущены
+повторно после ошибки. Оригинал можно сохранить в черновик во время обработки, публикация
+ждёт готовности профиля.
 
 Медиа в контенте хранится как UUID (`format: "media"`), а не как URL.
 
@@ -490,7 +510,6 @@ PATCH — optimistic concurrency: в теле передаётся актуал�
 | 409 | `conflict` | revision, уникальность, состояние |
 | 413 | `request_too_large`, `file_too_large` | лимит размера |
 | 415 | `unsupported_media_type` | тип файла |
-| 421 | `misdirected_request` | HTTPS-запрос по хосту, не входящему в домены сред |
 | 422 | `schema_validation_failed`, `media_processing_failed` | данные не соответствуют схеме |
 | 429 | `rate_limited` | лимит публичных отправок |
 | 500 | `internal_error` | необработанная ошибка |

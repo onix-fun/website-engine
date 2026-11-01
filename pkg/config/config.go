@@ -39,8 +39,6 @@ type Config struct {
 
 	S3 S3Config
 
-	TLS TLSConfig
-
 	ReleaseCacheDir  string
 	ReleaseMasterKey string
 	MaxReleaseBytes  int64
@@ -50,25 +48,6 @@ type Config struct {
 	// whether plain http:// is accepted (local development only).
 	ProviderExtraHosts    []string
 	ProviderAllowInsecure bool
-}
-
-// TLSConfig controls the HTTPS listeners and the ACME client. When Enabled is
-// false the servers run plain HTTP only.
-type TLSConfig struct {
-	// Enabled starts the HTTPS SNI listener and the ACME HTTP-01 listener.
-	Enabled bool
-	// HTTPSAddr is the TLS listener address.
-	HTTPSAddr string
-	// HTTPAddr is the plain listener for ACME HTTP-01 and HTTP redirects.
-	HTTPAddr string
-	// Email is the ACME account contact.
-	Email string
-	// Staging uses the Let's Encrypt staging directory to avoid prod limits.
-	Staging bool
-	// CacheDir stores issued certificates in a persistent volume.
-	CacheDir string
-	// RefreshInterval reloads the domain map from the database.
-	RefreshInterval time.Duration
 }
 
 type S3Config struct {
@@ -116,15 +95,6 @@ func Load() (Config, error) {
 			PublicBaseURL:  getenv("S3_PUBLIC_BASE_URL", "http://localhost:9000"),
 			ForcePathStyle: getenvBool("S3_FORCE_PATH_STYLE", true),
 			EnsureBucket:   getenvBool("S3_ENSURE_BUCKET", false),
-		},
-		TLS: TLSConfig{
-			Enabled:         getenvBool("TLS_ENABLED", false),
-			HTTPSAddr:       getenv("HTTPS_ADDR", ":443"),
-			HTTPAddr:        getenv("TLS_HTTP_ADDR", ":80"),
-			Email:           strings.TrimSpace(os.Getenv("ACME_EMAIL")),
-			Staging:         getenvBool("ACME_STAGING", false),
-			CacheDir:        getenv("TLS_CACHE_DIR", "./data/tls"),
-			RefreshInterval: 1 * time.Minute,
 		},
 	}
 	cfg.S3.PublicBaseURL = strings.TrimRight(cfg.S3.PublicBaseURL, "/")
@@ -207,17 +177,6 @@ func (c Config) Validate() error {
 	}
 	if err := validateURL(c.S3.PublicBaseURL, "S3_PUBLIC_BASE_URL"); err != nil {
 		return err
-	}
-	if c.TLS.Enabled {
-		if c.TLS.CacheDir == "" {
-			return errors.New("TLS_CACHE_DIR must not be empty when TLS_ENABLED is true")
-		}
-		if c.TLS.HTTPAddr == "" || c.TLS.HTTPSAddr == "" {
-			return errors.New("TLS_HTTP_ADDR and HTTPS_ADDR must not be empty when TLS_ENABLED is true")
-		}
-		if c.TLS.Email != "" && !strings.Contains(c.TLS.Email, "@") {
-			return errors.New("ACME_EMAIL must be an email address")
-		}
 	}
 	return nil
 }

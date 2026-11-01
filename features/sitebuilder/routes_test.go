@@ -96,7 +96,7 @@ func TestCompileRouteTreeSupportsIntermediateRegexCapturesAndCatchAll(t *testing
 	}
 }
 
-func TestCompileRouteTreeRequiresPagesOnlyAtRouteLeaves(t *testing.T) {
+func TestCompileRouteTreeSupportsPagesAtIntermediateNodes(t *testing.T) {
 	valid := RouteTreeNode{ID: "root", Type: "index", Children: []RouteTreeNode{
 		{ID: "catalog", Type: "static", Value: "catalog", Children: []RouteTreeNode{
 			{ID: "item", Type: "param", Name: "slug", PageID: "detail"},
@@ -110,12 +110,88 @@ func TestCompileRouteTreeRequiresPagesOnlyAtRouteLeaves(t *testing.T) {
 	branchPage.Children = []RouteTreeNode{{ID: "catalog", Type: "static", Value: "catalog", PageID: "list", Children: []RouteTreeNode{
 		{ID: "item", Type: "param", Name: "slug", PageID: "detail"},
 	}}}
-	if _, err := CompileRouteTree(branchPage); err == nil {
-		t.Fatal("expected a mapped intermediate branch to be rejected")
+	routes, err := CompileRouteTree(branchPage)
+	if err != nil {
+		t.Fatalf("page on an intermediate route was rejected: %v", err)
+	}
+	if len(routes) != 2 || routes[0].PageID != "list" || routes[1].PageID != "detail" {
+		t.Fatalf("expected both the parent and child pages, got %#v", routes)
 	}
 
 	missingLeafPage := RouteTreeNode{ID: "root", Type: "index", Children: []RouteTreeNode{{ID: "catalog", Type: "static", Value: "catalog"}}}
 	if _, err := CompileRouteTree(missingLeafPage); err == nil {
 		t.Fatal("expected a route leaf without a page to be rejected")
+	}
+}
+
+func TestCompileSiteRouteForestSupportsIndependentRootsAndAliases(t *testing.T) {
+	routes, err := CompileRouteTree(RouteTreeNode{ID: "site", Type: "site", Children: []RouteTreeNode{
+		{ID: "home", Type: "path", Path: "/", PageID: "home"},
+		{ID: "about", Type: "path", Path: "/about", PageID: "about"},
+		{ID: "catalog", Type: "path", Path: "/catalog", PageID: "catalog", Children: []RouteTreeNode{
+			{ID: "catalog-detail", Type: "param", Name: "slug", PageID: "detail"},
+		}},
+		{ID: "products", Type: "path", Path: "/products", PageID: "catalog", Children: []RouteTreeNode{
+			{ID: "product-detail", Type: "param", Name: "slug", PageID: "detail"},
+		}},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]string{
+		"^/$":                        "home",
+		"^/about$":                   "about",
+		"^/catalog$":                 "catalog",
+		"^/catalog/(?<slug>[^/]+)$":  "detail",
+		"^/products$":                "catalog",
+		"^/products/(?<slug>[^/]+)$": "detail",
+	}
+	if len(routes) != len(want) {
+		t.Fatalf("compiled %d routes, want %d: %#v", len(routes), len(want), routes)
+	}
+	for _, route := range routes {
+		if pageID, ok := want[route.Pattern]; !ok || pageID != route.PageID {
+			t.Fatalf("unexpected compiled route %#v", route.Route)
+		}
+	}
+	for _, path := range []string{"/", "/about", "/catalog", "/catalog/one", "/products", "/products/one"} {
+		if _, _, matched, err := MatchRoute(routes, path); err != nil || !matched {
+			t.Fatalf("path %q did not match: matched=%v err=%v", path, matched, err)
+		}
+	}
+}
+
+func TestCompileSiteRootPathSupportsTypedSegmentsAndRejectsInvalidPaths(t *testing.T) {
+	routes, err := CompileRouteTree(RouteTreeNode{ID: "site", Type: "site", Children: []RouteTreeNode{
+		{ID: "root", Type: "path", Path: "/catalog/~(?<category>[a-z]+)/:slug", PageID: "product"},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, args, matched, err := MatchRoute(routes, "/catalog/feed/green-feed")
+	if err != nil || !matched || args["category"] != "feed" || args["slug"] != "green-feed" {
+		t.Fatalf("unexpected root path match: args=%#v matched=%v err=%v", args, matched, err)
+	}
+	for _, path := range []string{"catalog", "/catalog/", "/catalog//item", "/catalog/*rest/final", "/catalog/:bad-name", "/catalog/~[", "/../admin"} {
+		if _, err := CompileRouteTree(RouteTreeNode{ID: "site", Type: "site", Children: []RouteTreeNode{{ID: "root", Type: "path", Path: path, PageID: "page"}}}); err == nil {
+			t.Errorf("path %q should have been rejected", path)
+		}
+	}
+
+	queryRegex, err := CompileRouteTree(RouteTreeNode{ID: "site", Type: "site", Children: []RouteTreeNode{
+		{ID: "optional-segment", Type: "path", Path: "/catalog/~(?<version>v[0-9]+)", PageID: "catalog"},
+	}})
+	if err != nil {
+		t.Fatalf("regex syntax containing ? was rejected: %v", err)
+	}
+	if _, args, matched, err := MatchRoute(queryRegex, "/catalog/v2"); err != nil || !matched || args["version"] != "v2" {
+		t.Fatalf("unexpected regex path match: args=%#v matched=%v err=%v", args, matched, err)
+	}
+	for _, pattern := range []string{"a*", "(?:)"} {
+		if _, err := CompileRouteTree(RouteTreeNode{ID: "site", Type: "site", Children: []RouteTreeNode{
+			{ID: "empty", Type: "path", Path: "/~" + pattern, PageID: "page"},
+		}}); err == nil {
+			t.Errorf("root regex %q should not match an empty URL segment", pattern)
+		}
 	}
 }

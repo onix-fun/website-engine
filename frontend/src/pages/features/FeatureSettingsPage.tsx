@@ -189,7 +189,16 @@ export default function FeatureSettingsPage() {
         </InlineAlert>
       )}
       <div className="rounded-lg border border-border bg-card p-4">
-        <EntryFieldsForm fields={fields} metadata={metadata} onChange={setValue} disabled={feature.status === "archived"} issues={issues} />
+        <EntryFieldsForm
+          fields={fields}
+          metadata={metadata}
+          onChange={setValue}
+          disabled={feature.status === "archived"}
+          issues={issues}
+          featureKey={activeFeature.key}
+          buildDigest={activeFeature.buildDigest}
+          schemaKind="settings"
+        />
       </div>
     </div>
   );

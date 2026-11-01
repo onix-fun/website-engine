@@ -26,6 +26,8 @@ type Composition = {
   page: { id: string; name: string; kind: string };
   metadata: { title: string; description: string; faviconUrl: string; ogTitle: string; ogDescription: string; ogImageUrl: string };
   sharedStyleUrls?: string[];
+  themeStyleUrl?: string;
+  systemAssets?: { logoUrl?: string };
   placements: RuntimePlacement[];
 };
 
@@ -36,6 +38,7 @@ type FeatureProps = {
   sdk: RuntimeSDK;
   collectionEndpoint?: string;
   detailLink?: RuntimePlacement["detailLink"];
+  systemAssets?: Composition["systemAssets"];
 };
 
 type RuntimeSDK = {
@@ -90,15 +93,34 @@ function featureModule(url: string): Promise<LoadedFeature> {
   return request;
 }
 
-function ensureStyles(urls: string[]) {
-  for (const href of urls) {
-    if (document.querySelector(`link[data-feature-style="${CSS.escape(href)}"]`)) continue;
-    const link = document.createElement("link");
-    link.rel = "stylesheet";
-    link.href = href;
-    link.dataset.featureStyle = href;
-    document.head.append(link);
-  }
+const styleRequests = new Map<string, Promise<void>>();
+
+function ensureStyles(urls: string[]): Promise<void> {
+  return Promise.all([...new Set(urls)].map((href) => {
+    const existingRequest = styleRequests.get(href);
+    if (existingRequest) return existingRequest;
+    const link = [...document.querySelectorAll<HTMLLinkElement>("link[data-feature-style]")]
+      .find((candidate) => candidate.dataset.featureStyle === href);
+    if (link?.sheet || link?.dataset.loaded === "true") return Promise.resolve();
+    const stylesheet = link ?? document.createElement("link");
+    stylesheet.rel = "stylesheet";
+    stylesheet.href = href;
+    stylesheet.dataset.featureStyle = href;
+    const request = new Promise<void>((resolve, reject) => {
+      stylesheet.onload = () => {
+        stylesheet.dataset.loaded = "true";
+        resolve();
+      };
+      stylesheet.onerror = () => {
+        stylesheet.remove();
+        styleRequests.delete(href);
+        reject(new Error(`Не удалось загрузить стили сайта: ${href}`));
+      };
+    });
+    styleRequests.set(href, request);
+    if (!link) document.head.append(stylesheet);
+    return request;
+  })).then(() => undefined);
 }
 
 function setHeadMetadata(metadata: Composition["metadata"]) {
@@ -125,14 +147,14 @@ function setHeadMetadata(metadata: Composition["metadata"]) {
   }
 }
 
-function FeatureMount({ placement }: { placement: RuntimePlacement }) {
+function FeatureMount({ placement, systemAssets }: { placement: RuntimePlacement; systemAssets?: Composition["systemAssets"] }) {
   const [Feature, setFeature] = useState<ComponentType<FeatureProps> | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     let active = true;
-    ensureStyles(placement.styleUrls);
-    void featureModule(placement.entryUrl)
+    void ensureStyles(placement.styleUrls)
+      .then(() => featureModule(placement.entryUrl))
       .then((module) => { if (active) setFeature(() => module.default); })
       .catch((reason: unknown) => {
         if (active) setError(reason instanceof Error ? reason.message : "Не удалось загрузить компонент");
@@ -143,11 +165,12 @@ function FeatureMount({ placement }: { placement: RuntimePlacement }) {
   if (error) return <div className="runtime-feature-error">Не удалось загрузить раздел</div>;
   if (!Feature) return <div className="runtime-loading" aria-hidden="true" />;
   const props = {
-	content: placement.content ?? {},
-	arguments: placement.arguments,
+    content: placement.content ?? {},
+    arguments: placement.arguments,
     featureKey: placement.featureKey,
     collectionEndpoint: placement.collectionEndpoint,
     detailLink: placement.detailLink,
+    systemAssets,
     sdk,
   } as FeatureProps;
   return <Suspense fallback={<div className="runtime-loading" aria-hidden="true" />}>{createElement(Feature, props)}</Suspense>;
@@ -193,7 +216,9 @@ export function RuntimeApp() {
         return;
       }
       const result = await response.json() as Composition;
-      ensureStyles(result.sharedStyleUrls ?? []);
+      // Shared styles provide Tailwind/shadcn foundations; the engine-owned
+      // theme follows them so the selected tokens win in the CSS cascade.
+      await ensureStyles([...(result.sharedStyleUrls ?? []), ...(result.themeStyleUrl ? [result.themeStyleUrl] : [])]);
       setHeadMetadata(result.metadata);
       setComposition(result);
       setState("ready");
@@ -216,7 +241,7 @@ export function RuntimeApp() {
         .filter((placement) => placement.slot === slot)
         .map((placement) => (
           <div className={`runtime-slot runtime-slot--${slot}`} key={placement.id}>
-            <FeatureMount placement={placement} />
+            <FeatureMount placement={placement} systemAssets={composition.systemAssets} />
           </div>
         )))}
     </div>

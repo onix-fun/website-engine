@@ -1,6 +1,7 @@
 package media
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -11,6 +12,8 @@ import (
 	"strings"
 	"time"
 	"websiteengine/features/media"
+	"websiteengine/features/sitebuilder"
+	"websiteengine/pkg/environment"
 	"websiteengine/pkg/principal"
 
 	"github.com/google/uuid"
@@ -20,12 +23,21 @@ import (
 
 type Handler struct {
 	service   *media.Service
+	profiles  MediaProfileProvider
 	log       *slog.Logger
 	maxUpload int64
 }
 
+type MediaProfileProvider interface {
+	MediaProfile(context.Context, environment.Environment, string, string, string, string, string) (sitebuilder.MediaProfileLookup, error)
+}
+
 func NewHandler(service *media.Service, log *slog.Logger, maxUpload int64) *Handler {
 	return &Handler{service: service, log: log, maxUpload: maxUpload}
+}
+
+func (h *Handler) SetProfileProvider(provider MediaProfileProvider) {
+	h.profiles = provider
 }
 
 func (h *Handler) Upload(w http.ResponseWriter, r *http.Request) {
@@ -210,6 +222,97 @@ func (h *Handler) Retry(w http.ResponseWriter, r *http.Request) {
 	response.JSON(w, http.StatusOK, m)
 }
 
+type renditionRequest struct {
+	FeatureKey   string `json:"featureKey"`
+	BuildVersion string `json:"buildVersion,omitempty"`
+	SchemaKind   string `json:"schemaKind"`
+	FieldPath    string `json:"fieldPath"`
+	BuildDigest  string `json:"buildDigest"`
+}
+
+func (h *Handler) PrepareRendition(w http.ResponseWriter, r *http.Request) {
+	id, ok := mediaID(w, r)
+	if !ok {
+		return
+	}
+	if h.profiles == nil {
+		response.Error(w, r, http.StatusServiceUnavailable, "media_profiles_unavailable", "Схема медиа-полей недоступна")
+		return
+	}
+	var req renditionRequest
+	if err := response.DecodeJSON(w, r, &req, 32<<10); err != nil {
+		response.WriteDecodeError(w, r, err)
+		return
+	}
+	profile, err := h.profiles.MediaProfile(r.Context(), environment.Dev, req.FeatureKey, req.BuildVersion, req.SchemaKind, req.FieldPath, req.BuildDigest)
+	if err != nil {
+		h.writeProfileError(w, r, err)
+		return
+	}
+	if !profile.HasProfile {
+		profile.Profile = media.FieldProfile{Accept: "file"}
+	}
+	state, err := h.service.Prepare(r.Context(), id, profile.Profile)
+	if err != nil {
+		h.writeError(w, r, err)
+		return
+	}
+	state.BuildDigest = profile.BuildDigest
+	response.JSON(w, http.StatusAccepted, state)
+}
+
+func (h *Handler) RenditionState(w http.ResponseWriter, r *http.Request) {
+	id, ok := mediaID(w, r)
+	if !ok {
+		return
+	}
+	if h.profiles == nil {
+		response.Error(w, r, http.StatusServiceUnavailable, "media_profiles_unavailable", "Схема медиа-полей недоступна")
+		return
+	}
+	query := r.URL.Query()
+	profile, err := h.profiles.MediaProfile(r.Context(), environment.Dev, query.Get("featureKey"), query.Get("buildVersion"), query.Get("schemaKind"), query.Get("fieldPath"), query.Get("buildDigest"))
+	if err != nil {
+		h.writeProfileError(w, r, err)
+		return
+	}
+	if !profile.HasProfile {
+		response.JSON(w, http.StatusOK, media.RenditionState{MediaID: id.String(), Status: "ready", Outputs: map[string]media.Output{}})
+		return
+	}
+	state, err := h.service.State(r.Context(), id, profile.Profile)
+	if err != nil {
+		if errors.Is(err, media.ErrNotFound) {
+			profileHash, hashErr := media.ProfileHash(profile.Profile)
+			if hashErr == nil {
+				state = media.RenditionState{MediaID: id.String(), ProfileHash: profileHash, Status: "pending", Outputs: map[string]media.Output{}}
+				state.BuildDigest = profile.BuildDigest
+				response.JSON(w, http.StatusOK, state)
+				return
+			}
+		}
+		h.writeError(w, r, err)
+		return
+	}
+	state.BuildDigest = profile.BuildDigest
+	response.JSON(w, http.StatusOK, state)
+}
+
+func (h *Handler) writeProfileError(w http.ResponseWriter, r *http.Request, err error) {
+	switch {
+	case errors.Is(err, sitebuilder.ErrNotFound):
+		response.Error(w, r, http.StatusNotFound, "media_field_not_found", "Поле медиа не найдено в активной сборке")
+	case errors.Is(err, sitebuilder.ErrConflict):
+		response.Error(w, r, http.StatusConflict, "feature_build_changed", err.Error())
+	case errors.Is(err, sitebuilder.ErrInvalid):
+		response.Error(w, r, http.StatusUnprocessableEntity, "invalid_media_field", err.Error())
+	case errors.Is(err, sitebuilder.ErrSnapshotUnavailable):
+		response.Error(w, r, http.StatusConflict, "no_active_snapshot", "Нет активного dev-снапшота")
+	default:
+		h.writeError(w, r, err)
+	}
+}
+
 func (h *Handler) Delete(w http.ResponseWriter, r *http.Request) {
 	id, ok := mediaID(w, r)
 	if !ok {
@@ -230,7 +333,12 @@ func (h *Handler) Redirect(w http.ResponseWriter, r *http.Request) {
 		response.Error(w, r, http.StatusNotFound, "not_found", "Медиаобъект не найден")
 		return
 	}
-	url, err := h.service.RedirectURL(r.Context(), id, r.URL.Query().Get("variant"))
+	var url string
+	if profileHash := r.URL.Query().Get("profile"); profileHash != "" {
+		url, err = h.service.RedirectRenditionURL(r.Context(), id, profileHash, r.URL.Query().Get("variant"))
+	} else {
+		url, err = h.service.RedirectURL(r.Context(), id, r.URL.Query().Get("variant"))
+	}
 	if err != nil {
 		if errors.Is(err, media.ErrNotFound) {
 			response.Error(w, r, http.StatusNotFound, "not_found", "Медиаобъект не найден")
@@ -243,6 +351,27 @@ func (h *Handler) Redirect(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "public, max-age=300")
 	w.Header().Set("Location", url)
 	w.WriteHeader(http.StatusFound)
+}
+
+// SystemAsset streams a font or logo through the engine origin so public
+// themes do not depend on bucket CORS configuration. The route's CORS
+// middleware owns origin policy; this handler must not override it.
+func (h *Handler) SystemAsset(w http.ResponseWriter, r *http.Request) {
+	id, err := uuid.Parse(r.PathValue("id"))
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	media, reader, err := h.service.ReadAsset(r.Context(), id)
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	defer reader.Close()
+	w.Header().Set("Content-Type", media.ContentType)
+	w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	_, _ = io.Copy(w, reader)
 }
 
 func mediaID(w http.ResponseWriter, r *http.Request) (uuid.UUID, bool) {

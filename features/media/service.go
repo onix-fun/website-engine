@@ -3,6 +3,7 @@ package media
 import (
 	"bytes"
 	"context"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -22,13 +23,21 @@ import (
 const cacheControl = "public, max-age=31536000, immutable"
 
 type Service struct {
-	repo      *Repository
-	store     storage.ObjectStore
-	maxUpload int64
+	repo             *Repository
+	store            storage.ObjectStore
+	maxUpload        int64
+	processor        RenditionProcessor
+	processorErr     error
+	referenceChecker func(context.Context, uuid.UUID) (bool, error)
 }
 
 func NewService(repo *Repository, store storage.ObjectStore, maxUpload int64) *Service {
-	return &Service{repo: repo, store: store, maxUpload: maxUpload}
+	processor, err := NewFFmpegProcessor()
+	return &Service{repo: repo, store: store, maxUpload: maxUpload, processor: processor, processorErr: err}
+}
+
+func NewServiceWithProcessor(repo *Repository, store storage.ObjectStore, maxUpload int64, processor RenditionProcessor) *Service {
+	return &Service{repo: repo, store: store, maxUpload: maxUpload, processor: processor}
 }
 
 func (s *Service) Upload(ctx context.Context, actor principal.Principal, filename string, data []byte) (Media, error) {
@@ -40,6 +49,9 @@ func (s *Service) Upload(ctx context.Context, actor principal.Principal, filenam
 	}
 	filename = sanitizeFilename(filename)
 	contentType := http.DetectContentType(data[:min(len(data), 512)])
+	if strings.EqualFold(filepath.Ext(filename), ".woff2") && len(data) >= 4 && string(data[:4]) == "wOF2" {
+		contentType = "font/woff2"
+	}
 	if strings.EqualFold(filepath.Ext(filename), ".svg") && looksLikeSVG(data) {
 		contentType = "image/svg+xml"
 	}
@@ -77,18 +89,7 @@ func (s *Service) Upload(ctx context.Context, actor principal.Principal, filenam
 		_ = s.repo.SetFailed(context.Background(), id)
 		return Media{}, fmt.Errorf("upload original: %w", err)
 	}
-	variants := map[string]string{"original": objectKey}
-	if isRasterImage(contentType) {
-		generated, err := buildImageVariants(ctx, s.store, id.String(), data, contentType)
-		if err != nil {
-			_ = s.repo.SetFailed(context.Background(), id)
-			return Media{}, fmt.Errorf("%w: %v", ErrProcessing, err)
-		}
-		for name, key := range generated {
-			variants[name] = key
-		}
-	}
-	ready, err := s.repo.SetReady(ctx, id, variants)
+	ready, err := s.repo.SetReady(ctx, id, map[string]string{"original": objectKey})
 	if err != nil {
 		return Media{}, err
 	}
@@ -190,6 +191,21 @@ func (s *Service) Get(ctx context.Context, id uuid.UUID) (Media, error) {
 	return s.repo.Get(ctx, id)
 }
 
+func (s *Service) ReadAsset(ctx context.Context, id uuid.UUID) (Media, io.ReadCloser, error) {
+	media, err := s.repo.Get(ctx, id)
+	if err != nil {
+		return Media{}, nil, err
+	}
+	if media.Status != "ready" {
+		return Media{}, nil, ErrNotFound
+	}
+	reader, err := s.store.Get(ctx, media.ObjectKey)
+	if err != nil {
+		return Media{}, nil, err
+	}
+	return media, reader, nil
+}
+
 // Rename changes the display name of a media object. Only the metadata in the
 // database changes: the object key stays intact so published content keeps
 // resolving to the same file.
@@ -256,6 +272,15 @@ func (s *Service) Retry(ctx context.Context, id uuid.UUID) (Media, error) {
 }
 
 func (s *Service) Delete(ctx context.Context, id uuid.UUID) error {
+	if s.referenceChecker != nil {
+		referenced, err := s.referenceChecker(ctx, id)
+		if err != nil {
+			return fmt.Errorf("check system asset references: %w", err)
+		}
+		if referenced {
+			return &ConflictError{Message: "Файл используется дизайн-системой или снапшотом и не может быть удалён"}
+		}
+	}
 	m, err := s.repo.Get(ctx, id)
 	if err != nil {
 		return err
@@ -268,6 +293,13 @@ func (s *Service) Delete(ctx context.Context, id uuid.UUID) error {
 	for _, key := range m.Variants {
 		keys[key] = true
 	}
+	renditionKeys, err := s.repo.RenditionObjectKeys(ctx, id)
+	if err != nil {
+		return fmt.Errorf("list media rendition objects: %w", err)
+	}
+	for _, key := range renditionKeys {
+		keys[key] = true
+	}
 	var errs []error
 	for key := range keys {
 		if err := s.store.Delete(ctx, key); err != nil {
@@ -278,6 +310,10 @@ func (s *Service) Delete(ctx context.Context, id uuid.UUID) error {
 		return fmt.Errorf("delete media objects: %w", err)
 	}
 	return s.repo.SetDeleted(ctx, id)
+}
+
+func (s *Service) SetReferenceChecker(checker func(context.Context, uuid.UUID) (bool, error)) {
+	s.referenceChecker = checker
 }
 
 // RedirectURL returns only a URL built from database-owned S3 keys.
@@ -299,8 +335,39 @@ func (s *Service) RedirectURL(ctx context.Context, id uuid.UUID, variant string)
 	return s.store.PublicURL(key)
 }
 
+func (s *Service) RedirectRenditionURL(ctx context.Context, id uuid.UUID, profileHash, variant string) (string, error) {
+	if profileHash == "" {
+		return "", ErrNotFound
+	}
+	if _, err := hex.DecodeString(profileHash); err != nil || len(profileHash) != 64 {
+		return "", ErrNotFound
+	}
+	mediaObject, err := s.repo.Get(ctx, id)
+	if err != nil || mediaObject.Status != "ready" {
+		return "", ErrNotFound
+	}
+	record, err := s.repo.GetRendition(ctx, id, profileHash)
+	if err != nil || record.Status != "ready" {
+		return "", ErrNotFound
+	}
+	output, ok := record.Outputs[variant]
+	if !ok {
+		return "", ErrNotFound
+	}
+	return s.store.PublicURL(output.ObjectKey)
+}
+
 func (s *Service) Ready(ctx context.Context) error {
-	return s.store.Ready(ctx)
+	if err := s.store.Ready(ctx); err != nil {
+		return err
+	}
+	if s.processorErr != nil {
+		return s.processorErr
+	}
+	if s.processor == nil {
+		return errors.New("media processor is not configured")
+	}
+	return s.processor.Ready(ctx)
 }
 
 func isRasterImage(contentType string) bool {
@@ -319,6 +386,7 @@ var allowedContentTypes = map[string]string{
 	"image/svg+xml":   ".svg",
 	"application/pdf": ".pdf",
 	"video/mp4":       ".mp4",
+	"font/woff2":      ".woff2",
 }
 
 // AcceptedContentTypes lists the content types accepted by the upload API.

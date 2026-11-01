@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -70,7 +70,7 @@ export default function EnvironmentSettingsPage() {
           <Badge variant={envKey === "prod" ? "success" : "secondary"}>{envKey}</Badge>
         </h1>
         <p className="mt-1 text-sm text-muted-foreground">
-          Домены используются TLS-роутером, CORS-origins — публичным API этой среды.
+          CORS-origins определяют, с каких адресов публичный API этой среды принимает запросы из браузера.
         </p>
       </div>
       <EnvironmentForm
@@ -88,17 +88,7 @@ export default function EnvironmentSettingsPage() {
 function EnvironmentForm({ env, onSaved }: { env: SiteEnvironment; onSaved: () => void }) {
   const [name, setName] = useState(env.name);
   const [baseUrl, setBaseUrl] = useState(env.public_base_url);
-  const [domains, setDomains] = useState(env.domains.join("\n"));
   const [origins, setOrigins] = useState(env.cors_origins.join("\n"));
-  const [tls, setTls] = useState(env.tls_enabled);
-
-  // A concurrent change bumps the revision: offer the freshest state instead
-  // of asking the operator to re-type everything after a conflict.
-  const [acknowledgedRevision, setAcknowledgedRevision] = useState(env.revision);
-  useEffect(() => {
-    if (env.revision !== acknowledgedRevision) setTls(env.tls_enabled);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [env.revision, env.updated_at]);
 
   const splitLines = (raw: string) =>
     raw
@@ -112,12 +102,9 @@ function EnvironmentForm({ env, onSaved }: { env: SiteEnvironment; onSaved: () =
         revision: env.revision,
         name: name.trim() || undefined,
         public_base_url: baseUrl.trim(),
-        domains: splitLines(domains),
         cors_origins: splitLines(origins),
-        tls_enabled: tls,
       }),
-    onSuccess: (updated) => {
-      setAcknowledgedRevision(updated.revision);
+    onSuccess: () => {
       onSaved();
     },
     onError: (error) => {
@@ -159,21 +146,6 @@ function EnvironmentForm({ env, onSaved }: { env: SiteEnvironment; onSaved: () =
         </label>
         <label className="block max-w-lg text-sm">
           <span className="mb-1 block text-xs text-muted-foreground">
-            Домены TLS/SNI (по одному в строке)
-          </span>
-          <textarea
-            className="min-h-20 w-full rounded-md border border-border bg-transparent px-3 py-2 text-sm"
-            value={domains}
-            onChange={(event) => setDomains(event.target.value)}
-            placeholder={"example.com\nwww.example.com"}
-          />
-          <span className="mt-1 block text-xs text-muted-foreground">
-            Домены не должны пересекаться между dev и prod. При включённом ACME для них выписываются
-            сертификаты.
-          </span>
-        </label>
-        <label className="block max-w-lg text-sm">
-          <span className="mb-1 block text-xs text-muted-foreground">
             CORS-origins публичного API (по одному в строке)
           </span>
           <textarea
@@ -187,15 +159,6 @@ function EnvironmentForm({ env, onSaved }: { env: SiteEnvironment; onSaved: () =
             конфигурации.
           </span>
         </label>
-        <label className="flex items-center gap-2 text-sm">
-          <input
-            type="checkbox"
-            className="size-4 accent-primary"
-            checked={tls}
-            onChange={(event) => setTls(event.target.checked)}
-          />
-          HTTPS/ACME включён для этой среды
-        </label>
         <div className="flex items-center gap-2">
           <Button onClick={() => save.mutate()} loading={save.isPending}>
             <Save />
@@ -207,9 +170,7 @@ function EnvironmentForm({ env, onSaved }: { env: SiteEnvironment; onSaved: () =
             onClick={() => {
               setName(env.name);
               setBaseUrl(env.public_base_url);
-              setDomains(env.domains.join("\n"));
               setOrigins(env.cors_origins.join("\n"));
-              setTls(env.tls_enabled);
             }}
           >
             Сбросить

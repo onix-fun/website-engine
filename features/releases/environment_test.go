@@ -8,26 +8,6 @@ import (
 	"websiteengine/pkg/environment"
 )
 
-func TestSanitizeDomain(t *testing.T) {
-	cases := map[string]string{
-		"Example.COM":         "example.com",
-		"  example.com  ":     "example.com",
-		"https://example.com": "example.com",
-		"http://example.com/": "example.com",
-		"example.com/":        "example.com",
-		"example.com:8443":    "example.com",
-		"example.com/path":    "", // paths rejected
-		"*.example.com":       "", // wildcards rejected
-		"exa mple.com":        "", // spaces rejected
-		"":                    "",
-	}
-	for raw, want := range cases {
-		if got := sanitizeDomain(raw); got != want {
-			t.Errorf("sanitizeDomain(%q) = %q, want %q", raw, got, want)
-		}
-	}
-}
-
 func TestSanitizeName(t *testing.T) {
 	cases := map[string]string{
 		"  Production  ":         "Production",
@@ -70,20 +50,9 @@ func TestUpdateEnvironmentValidation(t *testing.T) {
 			s := "/api"
 			in.PublicBaseURL = &s
 		}, wantErr: "public_base_url must be an absolute"},
-		{name: "domain too long", env: env, apply: func(in *EnvironmentInput) {
-			s := []string{strings.Repeat("a", 260) + ".com"}
-			in.Domains = metaBad(s)
-		}, wantErr: "is too long"},
-		{name: "too many domains", env: env, apply: func(in *EnvironmentInput) {
-			s := make([]string, 0, domainLimit+1)
-			for i := 0; i <= domainLimit; i++ {
-				s = append(s, domainPrefix(i)+".example.com")
-			}
-			in.Domains = metaBad(s)
-		}, wantErr: "at most"},
 		{name: "too many origins", env: env, apply: func(in *EnvironmentInput) {
-			s := make([]string, 0, domainLimit+1)
-			for i := 0; i <= domainLimit; i++ {
+			s := make([]string, 0, corsOriginLimit+1)
+			for i := 0; i <= corsOriginLimit; i++ {
 				s = append(s, "https://origin.example.com/"+strings.Repeat("a", i)+"")
 			}
 			in.CORSOrigins = metaBad(s)
@@ -109,8 +78,6 @@ func TestUpdateEnvironmentValidation(t *testing.T) {
 		})
 	}
 }
-
-func domainPrefix(i int) string { return strings.Repeat("d", i+1) }
 
 func TestValidationErrorUnwraps(t *testing.T) {
 	var err error = &ValidationError{Message: "boom"}

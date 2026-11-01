@@ -101,8 +101,11 @@ type testEnv struct {
 	prodServer *httptest.Server
 	adminToken string
 	store      *fakeStore
+	media      *media.Service
+	processor  *integrationRenditionProcessor
 	releases   *releases.Service
 	content    *content.Service
+	forms      *forms.Service
 	snapshots  *sitebuilder.SnapshotService
 }
 
@@ -149,7 +152,11 @@ func newTestEnv(t *testing.T) *testEnv {
 	buildService := sitebuilder.NewBuildService(pool, store, 8<<20)
 	snapshotService := sitebuilder.NewSnapshotService(pool, buildService)
 	mediaRepo := media.NewRepository(pool)
-	mediaService := media.NewService(mediaRepo, store, 20<<20)
+	processor := &integrationRenditionProcessor{}
+	mediaService := media.NewServiceWithProcessor(mediaRepo, store, 20<<20, processor)
+	snapshotService.SetMediaService(mediaService)
+	mediaHandler := hmedia.NewHandler(mediaService, log, 20<<20)
+	mediaHandler.SetProfileProvider(snapshotService)
 
 	releaseRepo := releases.NewRepository(pool)
 	box, err := secrets.New(strings.Repeat("k", 32))
@@ -173,7 +180,7 @@ func newTestEnv(t *testing.T) *testEnv {
 		Features:          hfeatures.NewHandler(featureService, log, 1<<20),
 		Content:           hcontent.NewHandler(contentService, log, 1<<20),
 		Forms:             hforms.NewHandler(formsService, log, 1<<20),
-		Media:             hmedia.NewHandler(mediaService, log, 20<<20),
+		Media:             mediaHandler,
 		Overview:          hoverview.NewHandler(overview.NewRepository(pool), log),
 		Releases:          releaseHandler,
 		PublicationEvents: hpublication.NewHandler(pool, log),
@@ -195,7 +202,7 @@ func newTestEnv(t *testing.T) *testEnv {
 	prodServer := httptest.NewServer(httptransport.NewPublicRouter(deps, environment.Prod))
 	t.Cleanup(prodServer.Close)
 	return &testEnv{t: t, pool: pool, server: server, devServer: devServer, prodServer: prodServer,
-		adminToken: testAdminToken, store: store, releases: releaseService, content: contentService, snapshots: snapshotService}
+		adminToken: testAdminToken, store: store, media: mediaService, processor: processor, releases: releaseService, content: contentService, forms: formsService, snapshots: snapshotService}
 }
 
 func (e *testEnv) request(method, path, token string, body any) (int, map[string]any, http.Header) {
@@ -642,6 +649,28 @@ func TestPublicCORSIsOptIn(t *testing.T) {
 	if resp.StatusCode != http.StatusForbidden {
 		t.Fatalf("denied preflight: %d", resp.StatusCode)
 	}
+
+	// System fonts and the shared logo are served by the engine origin. Their
+	// handler must preserve the same allow-list instead of adding wildcard CORS.
+	assetURL := env.devServer.URL + "/api/v2/system-assets/" + uuid.NewString()
+	for _, test := range []struct {
+		origin string
+		want   string
+	}{
+		{origin: "https://site.example", want: "https://site.example"},
+		{origin: "https://evil.example", want: ""},
+	} {
+		req, _ := http.NewRequest(http.MethodGet, assetURL, nil)
+		req.Header.Set("Origin", test.origin)
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusNotFound || resp.Header.Get("Access-Control-Allow-Origin") != test.want {
+			t.Fatalf("system asset CORS for %s: status=%d allow-origin=%q", test.origin, resp.StatusCode, resp.Header.Get("Access-Control-Allow-Origin"))
+		}
+	}
 }
 
 func TestDatabaseInvariants(t *testing.T) {
@@ -809,13 +838,26 @@ func TestMediaUploadRedirectAndDelete(t *testing.T) {
 		t.Fatalf("media not ready: %v", body)
 	}
 	variants := body["variants"].(map[string]any)
-	for _, key := range []string{"original", "thumbnail", "medium", "large"} {
-		if _, ok := variants[key]; !ok {
-			t.Fatalf("missing variant %s: %v", key, variants)
-		}
+	if len(variants) != 1 || variants["original"] == nil {
+		t.Fatalf("new upload should expose only the original before field-specific processing: %v", variants)
 	}
-	if len(env.store.objects) != 4 {
-		t.Fatalf("expected 4 stored objects, got %d", len(env.store.objects))
+	if len(env.store.objects) != 1 {
+		t.Fatalf("new upload should store only the original, got %d objects", len(env.store.objects))
+	}
+
+	// Existing media records can retain the old shared variants until their
+	// ABI 1 snapshots are retired. Simulate one such record and verify that its
+	// legacy URL keeps resolving even though fresh uploads no longer create it.
+	legacyVariantKey := "media/" + mediaID + "/legacy/thumbnail.webp"
+	if err := env.store.Put(context.Background(), legacyVariantKey, bytes.NewReader([]byte("legacy-thumbnail")), 16, storage.PutOptions{ContentType: "image/webp"}); err != nil {
+		t.Fatal(err)
+	}
+	legacyVariants, _ := json.Marshal(map[string]string{
+		"original":  variants["original"].(string),
+		"thumbnail": legacyVariantKey,
+	})
+	if _, err := env.pool.Exec(context.Background(), `UPDATE media_objects SET variants=$2::jsonb WHERE id=$1`, mediaID, legacyVariants); err != nil {
+		t.Fatal(err)
 	}
 	status, listBody, _ := env.request(http.MethodGet, "/api/v1/admin/media?q=cover&type=image", env.adminToken, nil)
 	if status != http.StatusOK || len(listBody["items"].([]any)) != 1 {
@@ -859,9 +901,18 @@ func TestMediaUploadRedirectAndDelete(t *testing.T) {
 		t.Fatalf("media usage without references: %d %v", status, usageBody)
 	}
 
-	req, _ := http.NewRequest(http.MethodGet, env.server.URL+"/media/"+mediaID+"?variant=thumbnail", nil)
+	req, _ := http.NewRequest(http.MethodGet, env.server.URL+"/media/"+mediaID, nil)
 	client := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 	resp, err := client.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusFound || !strings.HasSuffix(resp.Header.Get("Location"), "/original.png") {
+		t.Fatalf("original redirect: %d %s", resp.StatusCode, resp.Header.Get("Location"))
+	}
+	req, _ = http.NewRequest(http.MethodGet, env.server.URL+"/media/"+mediaID+"?variant=thumbnail", nil)
+	resp, err = client.Do(req)
 	if err != nil {
 		t.Fatal(err)
 	}

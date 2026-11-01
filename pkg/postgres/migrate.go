@@ -91,8 +91,8 @@ func Migrate(ctx context.Context, pool *pgxpool.Pool, fsys fs.FS) error {
 }
 
 // SeedDefaults creates the rows every deployment needs: the site settings
-// singleton and the dev/prod environment rows behind CORS routing, release
-// activation and HTTPS SNI routing. Idempotent; safe after truncate too.
+// singleton and the dev/prod environment rows behind CORS and release
+// activation. Idempotent; safe after truncate too.
 func SeedDefaults(ctx context.Context, pool *pgxpool.Pool) error {
 	if _, err := pool.Exec(ctx, `INSERT INTO site_settings (id) VALUES (TRUE) ON CONFLICT (id) DO NOTHING`); err != nil {
 		return fmt.Errorf("seed site settings: %w", err)
@@ -105,7 +105,7 @@ func SeedDefaults(ctx context.Context, pool *pgxpool.Pool) error {
 	}
 	if _, err := pool.Exec(ctx, `
 		INSERT INTO site_draft_config (id, config, revision)
-		VALUES (TRUE, '{"formatVersion":2,"pages":[{"id":"home","name":"Главная","kind":"page","placements":[]}],"routeTree":{"id":"root","type":"index","pageId":"home","children":[]}}'::jsonb, 1)
+		VALUES (TRUE, '{"formatVersion":3,"pages":[{"id":"home","name":"Главная","kind":"page","placements":[]}],"routeTree":{"id":"site","type":"site","children":[{"id":"home-route","type":"path","path":"/","pageId":"home","children":[]}]}}'::jsonb, 1)
 		ON CONFLICT (id) DO NOTHING`); err != nil {
 		return fmt.Errorf("seed default site page: %w", err)
 	}

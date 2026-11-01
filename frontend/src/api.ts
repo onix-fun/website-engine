@@ -5,6 +5,9 @@ import type {
   CreateTokenInput,
   CreatedToken,
   ContentFeature,
+  DesignSystem,
+  DesignSystemState,
+  DesignTokenDefinition,
   EntryDetail,
   EntryListParams,
   EntryVersion,
@@ -20,6 +23,8 @@ import type {
   ListResponse,
   Media,
   MediaListParams,
+  MediaRenditionContext,
+  MediaRenditionState,
   MediaStatus,
   MediaUsage,
   Overview,
@@ -34,6 +39,7 @@ import type {
   SiteSnapshotList,
   Submission,
   SubmissionFilters,
+  SubmissionListResponse,
   SubmissionStatus,
   Token,
 } from "./types";
@@ -84,28 +90,60 @@ async function requestItems<T>(
 
 function normalizeSiteDraft(draft: SiteDraftState): SiteDraftState {
   const config = draft?.config;
+  const legacyTree = normalizeRouteTree(config?.routeTree);
+  const routeTree = normalizeSiteRouteTree(legacyTree);
   return {
     ...draft,
     config: {
       ...config,
-      formatVersion: 2,
+      formatVersion: 3,
       pages: arrayOrEmpty(config?.pages).map((page) => ({
         ...page,
         placements: arrayOrEmpty(page?.placements),
       })),
-      routeTree: normalizeRouteTree(config?.routeTree),
+      routeTree,
     },
   };
 }
 
 function normalizeRouteTree(node: SiteConfig["routeTree"] | null | undefined): SiteConfig["routeTree"] {
   if (!node || typeof node !== "object") {
-    return { id: "root", type: "index", pageId: "home", children: [] };
+    return { id: "site", type: "site", children: [{ id: "home-route", type: "path", path: "/", pageId: "home", children: [] }] };
   }
   return {
     ...node,
     children: arrayOrEmpty(node.children).map((child) => normalizeRouteTree(child)),
   };
+}
+
+function normalizeSiteRouteTree(tree: SiteConfig["routeTree"]): SiteConfig["routeTree"] {
+  if (tree.type === "site") return tree;
+  if (tree.type !== "index") return { id: "site", type: "site", children: [toRootPathNode(tree)] };
+
+  // v2 treated / as a visible parent for every top-level URL segment. Those
+  // segments are independent route roots in the canvas, but compile to exactly
+  // the same URLs when promoted to siblings of the virtual site root.
+  const roots = [
+    ...(tree.pageId ? [{ id: tree.id, type: "path" as const, path: "/", pageId: tree.pageId, children: [] }] : []),
+    ...(tree.children ?? []).map(toRootPathNode),
+  ];
+  return { id: "site", type: "site", children: roots };
+}
+
+function toRootPathNode(node: SiteConfig["routeTree"]): SiteConfig["routeTree"] {
+  if (node.type === "path") {
+    return { id: node.id, type: "path", path: node.path ?? "/", ...(node.pageId ? { pageId: node.pageId } : {}), children: arrayOrEmpty(node.children) };
+  }
+  return { id: node.id, type: "path", path: legacyRootSegment(node), ...(node.pageId ? { pageId: node.pageId } : {}), children: arrayOrEmpty(node.children) };
+}
+
+function legacyRootSegment(node: SiteConfig["routeTree"]): string {
+  if (node.type === "path") return node.path ?? "/";
+  if (node.type === "static") return `/${node.value ?? ""}`;
+  if (node.type === "param") return `/:${node.name ?? "param"}`;
+  if (node.type === "regex") return `/~${node.pattern ?? ""}`;
+  if (node.type === "catchAll") return `/*${node.name ?? "path"}`;
+  return "/";
 }
 
 export class ApiError extends Error {
@@ -568,8 +606,8 @@ export const api = {
       cursor?: string | null,
       limit = 50,
       signal?: AbortSignal,
-    ): Promise<ListResponse<Submission>> {
-      return requestList<Submission>(
+    ): Promise<SubmissionListResponse> {
+      return request<SubmissionListResponse | null>(
         `${ADMIN_ROOT}/forms/${encoded(key)}/submissions`,
         {
           signal,
@@ -586,7 +624,11 @@ export const api = {
             sort: filters.sort,
           },
         },
-      );
+      ).then((response) => ({
+        items: arrayOrEmpty(response?.items),
+        next_cursor: response?.next_cursor ?? null,
+        fields: arrayOrEmpty(response?.fields),
+      }));
     },
     get(id: string, signal?: AbortSignal): Promise<Submission> {
       return request<Submission>(`${ADMIN_ROOT}/submissions/${encoded(id)}`, {
@@ -660,6 +702,31 @@ export const api = {
       return requestItems<MediaUsage>(
         `${ADMIN_ROOT}/media/${encoded(id)}/usage`,
         { signal },
+      );
+    },
+    prepareRenditions(id: string, context: MediaRenditionContext): Promise<MediaRenditionState> {
+      return request<MediaRenditionState>(
+        `${ADMIN_V2_ROOT}/media/${encoded(id)}/renditions/prepare`,
+        { method: "POST", body: context },
+      );
+    },
+    renditionState(
+      id: string,
+      context: MediaRenditionContext,
+      signal?: AbortSignal,
+    ): Promise<MediaRenditionState> {
+      return request<MediaRenditionState>(
+        `${ADMIN_V2_ROOT}/media/${encoded(id)}/renditions/state`,
+        {
+          signal,
+          query: {
+            featureKey: context.featureKey,
+            buildVersion: context.buildVersion,
+            schemaKind: context.schemaKind,
+            fieldPath: context.fieldPath,
+            buildDigest: context.buildDigest,
+          },
+        },
       );
     },
     retry(id: string): Promise<Media> {
@@ -748,6 +815,15 @@ export const api = {
     },
     promoteMetadata(): Promise<SiteMetadataState> {
       return request<SiteMetadataState>(`${ADMIN_V2_ROOT}/site/metadata/promote`, { method: "POST", body: {} });
+    },
+    designSystem(signal?: AbortSignal): Promise<{ state: DesignSystemState; definitions: DesignTokenDefinition[] }> {
+      return request(`${ADMIN_V2_ROOT}/site/design-system`, { signal });
+    },
+    saveDesignSystem(revision: number, designSystem: DesignSystem): Promise<{ state: DesignSystemState; definitions: DesignTokenDefinition[] }> {
+      return request(`${ADMIN_V2_ROOT}/site/design-system`, { method: "PUT", body: { revision, designSystem } });
+    },
+    previewDesignSystem(designSystem: DesignSystem): Promise<{ token: string }> {
+      return request(`${ADMIN_V2_ROOT}/site/design-system/preview`, { method: "POST", body: { designSystem } });
     },
     async snapshots(signal?: AbortSignal): Promise<SiteSnapshotList> {
       const snapshots = await request<SiteSnapshotList>(`${ADMIN_V2_ROOT}/site/snapshots`, { signal });
@@ -905,6 +981,7 @@ export const MEDIA_ACCEPTED_MIME = [
   "image/svg+xml",
   "application/pdf",
   "video/mp4",
+  "font/woff2",
 ] as const;
 
 export const MEDIA_MAX_BYTES = 20 * 1024 * 1024;
@@ -913,7 +990,7 @@ export function isUploadAccepted(file: File): boolean {
   const type = file.type.toLowerCase();
   if ((MEDIA_ACCEPTED_MIME as readonly string[]).includes(type)) return true;
   const ext = file.name.slice(file.name.lastIndexOf(".")).toLowerCase();
-  return [".jpg", ".jpeg", ".png", ".gif", ".webp", ".svg", ".pdf", ".mp4"].includes(ext);
+  return [".jpg", ".jpeg", ".png", ".gif", ".webp", ".svg", ".pdf", ".mp4", ".woff2"].includes(ext);
 }
 
 export const submissionStatusOptions: SubmissionStatus[] = [

@@ -266,12 +266,35 @@ func TestSnapshotPinnedFormSchemaAndPersistentSubmissions(t *testing.T) {
 	manifestV1 := manifestFor(key, "1.0.0", "form", objectSchema(map[string]any{"name": map[string]any{"type": "string", "minLength": 1}}, "name"))
 	buildV1 := uploadFeatureBuild(t, env, manifestV1, "export default function Feature() {}")
 	first := saveAndPublishSnapshot(t, env, formConfig("1.0.0"), "form v1")
+	env.forms.SetSnapshotSchemaProvider(env.snapshots)
 
 	status, response, _ := env.public(environment.Dev, http.MethodPost, "/api/v2/forms/"+key+"/submissions", map[string]any{"data": map[string]any{"name": "Ada"}})
 	if status != http.StatusCreated {
 		t.Fatalf("valid form v1 submission: status=%d body=%v", status, response)
 	}
 	submissionID := response["id"].(string)
+
+	status, allEnvironments, _ := env.request(http.MethodGet, "/api/v1/admin/forms/"+key+"/submissions", env.adminToken, nil)
+	if status != http.StatusOK {
+		t.Fatalf("list form submissions across all environments: status=%d body=%v", status, allEnvironments)
+	}
+	items, ok := allEnvironments["items"].([]any)
+	if !ok || len(items) != 1 {
+		t.Fatalf("expected the dev submission in the all-environments list: %v", allEnvironments)
+	}
+	fields, ok := allEnvironments["fields"].([]any)
+	if !ok || len(fields) != 1 {
+		t.Fatalf("expected submission schema fields in list response: %v", allEnvironments)
+	}
+	field, _ := fields[0].(map[string]any)
+	if field["key"] != "name" || field["label"] != "name" {
+		t.Fatalf("unexpected searchable field metadata: %v", fields)
+	}
+	status, filtered, _ := env.request(http.MethodGet, "/api/v1/admin/forms/"+key+"/submissions?field=name&q=Ada", env.adminToken, nil)
+	filteredItems, _ := filtered["items"].([]any)
+	if status != http.StatusOK || len(filteredItems) != 1 {
+		t.Fatalf("filter all-environments list by active schema field: status=%d body=%v", status, filtered)
+	}
 
 	manifestV2 := manifestFor(key, "1.1.0", "form", objectSchema(map[string]any{"email": map[string]any{"type": "string", "format": "email"}}, "email"))
 	buildV2 := uploadFeatureBuild(t, env, manifestV2, "export default function Feature() { return 'v2'; }")
@@ -322,9 +345,14 @@ func TestSnapshotPinnedFormSchemaAndPersistentSubmissions(t *testing.T) {
 	if status != http.StatusOK {
 		t.Fatalf("list persistent form submissions: status=%d body=%v", status, list)
 	}
-	items, ok := list["items"].([]any)
+	items, ok = list["items"].([]any)
 	if !ok || len(items) != 2 {
 		t.Fatalf("submissions should persist across snapshot promotion and rollback: %v", list)
+	}
+	status, allAfterSchemaChange, _ := env.request(http.MethodGet, "/api/v1/admin/forms/"+key+"/submissions", env.adminToken, nil)
+	allFields, _ := allAfterSchemaChange["fields"].([]any)
+	if status != http.StatusOK || len(allFields) != 2 {
+		t.Fatalf("all-environments list should expose fields from both active schemas: status=%d body=%v", status, allAfterSchemaChange)
 	}
 	if submissionID == "" {
 		t.Fatal("missing first form submission id")

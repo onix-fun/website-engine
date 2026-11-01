@@ -129,8 +129,8 @@ func (h *Handler) Environments(w http.ResponseWriter, r *http.Request) {
 }
 
 // UpdateEnvironment applies editable environment settings: name, public base
-// URL, domains, CORS origins and the TLS flag. Route middleware enforces the
-// admin role; the revision guards concurrent edits.
+// URL and CORS origins. Route middleware enforces the admin role; the revision
+// guards concurrent edits.
 func (h *Handler) UpdateEnvironment(w http.ResponseWriter, r *http.Request) {
 	key, err := environment.Parse(r.PathValue("key"))
 	if err != nil {
@@ -140,9 +140,7 @@ func (h *Handler) UpdateEnvironment(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Name          *string   `json:"name"`
 		PublicBaseURL *string   `json:"public_base_url"`
-		Domains       *[]string `json:"domains"`
 		CORSOrigins   *[]string `json:"cors_origins"`
-		TLSEnabled    *bool     `json:"tls_enabled"`
 		Revision      int64     `json:"revision"`
 	}
 	if err := response.DecodeJSON(w, r, &req, 8192); err != nil {
@@ -152,9 +150,7 @@ func (h *Handler) UpdateEnvironment(w http.ResponseWriter, r *http.Request) {
 	updated, err := h.service.UpdateEnvironment(r.Context(), key, releases.EnvironmentInput{
 		Name:          req.Name,
 		PublicBaseURL: req.PublicBaseURL,
-		Domains:       req.Domains,
 		CORSOrigins:   req.CORSOrigins,
-		TLSEnabled:    req.TLSEnabled,
 		Revision:      req.Revision,
 	})
 	if err != nil {

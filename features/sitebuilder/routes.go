@@ -217,16 +217,17 @@ func ResolveArguments(schema json.RawMessage, bindings map[string]ArgumentBindin
 	return out, nil
 }
 
-// CompileRouteTree turns an ordered route tree into anchored segment-regex
-// routes. Depth-first order preserves sibling priority throughout the tree.
+// CompileRouteTree turns a route tree (or a v3 forest under a virtual site
+// root) into anchored segment-regex routes. Depth-first order preserves route
+// priority while the virtual root keeps independent top-level paths separate.
 func CompileRouteTree(root RouteTreeNode) ([]CompiledRoute, error) {
-	if root.Type != "index" {
-		return nil, errors.New("route tree root must be an index node")
+	if root.Type != "index" && root.Type != "site" {
+		return nil, errors.New("route tree root must be an index or site node")
 	}
 	seen := map[string]bool{}
 	var routes []Route
 	var walk func(RouteTreeNode, string, map[string]bool, bool) error
-	walk = func(node RouteTreeNode, prefix string, inherited map[string]bool, rootNode bool) error {
+	walk = func(node RouteTreeNode, prefix string, inherited map[string]bool, routeRoot bool) error {
 		if strings.TrimSpace(node.ID) == "" || seen[node.ID] {
 			return fmt.Errorf("route node id %q is missing or duplicated", node.ID)
 		}
@@ -234,24 +235,39 @@ func CompileRouteTree(root RouteTreeNode) ([]CompiledRoute, error) {
 		pattern := prefix
 		captures := cloneSet(inherited)
 		switch node.Type {
+		case "path":
+			if !routeRoot || node.Value != "" || node.Name != "" || node.Pattern != "" {
+				return fmt.Errorf("path node %q is only allowed as a route root", node.ID)
+			}
+			pathPattern, pathCaptures, err := compilePathRoot(node.Path)
+			if err != nil {
+				return fmt.Errorf("path node %q: %w", node.ID, err)
+			}
+			for name := range pathCaptures {
+				if captures[name] {
+					return fmt.Errorf("path node %q has duplicate capture %q", node.ID, name)
+				}
+				captures[name] = true
+			}
+			pattern = pathPattern
 		case "index":
-			if !rootNode || prefix != "" || node.Value != "" || node.Name != "" || node.Pattern != "" {
-				return fmt.Errorf("index node %q is only allowed as the root", node.ID)
+			if !routeRoot || prefix != "" || node.Path != "" || node.Value != "" || node.Name != "" || node.Pattern != "" {
+				return fmt.Errorf("index node %q is only allowed as a route root", node.ID)
 			}
 			pattern = ""
 		case "static":
-			if rootNode || node.Value == "" || strings.ContainsAny(node.Value, "/?#") || node.Name != "" || node.Pattern != "" {
+			if node.Path != "" || node.Value == "" || node.Value == "." || node.Value == ".." || strings.ContainsAny(node.Value, "/?#") || node.Name != "" || node.Pattern != "" {
 				return fmt.Errorf("static node %q must contain one URL segment", node.ID)
 			}
 			pattern += "/" + regexp.QuoteMeta(node.Value)
 		case "param":
-			if rootNode || !argumentPattern.MatchString(node.Name) || node.Value != "" || node.Pattern != "" || captures[node.Name] {
+			if node.Path != "" || !argumentPattern.MatchString(node.Name) || node.Value != "" || node.Pattern != "" || captures[node.Name] {
 				return fmt.Errorf("parameter node %q has an invalid or duplicate name", node.ID)
 			}
 			captures[node.Name] = true
 			pattern += "/(?<" + node.Name + ">[^/]+)"
 		case "regex":
-			if rootNode || node.Pattern == "" || strings.Contains(node.Pattern, "/") || node.Value != "" || node.Name != "" {
+			if node.Path != "" || node.Pattern == "" || strings.Contains(node.Pattern, "/") || node.Value != "" || node.Name != "" {
 				return fmt.Errorf("regex node %q must match one URL segment", node.ID)
 			}
 			segment, err := regexp2.Compile("\\A(?:"+node.Pattern+")\\z", regexp2.None)
@@ -259,6 +275,13 @@ func CompileRouteTree(root RouteTreeNode) ([]CompiledRoute, error) {
 				return fmt.Errorf("regex node %q: %w", node.ID, err)
 			}
 			segment.MatchTimeout = routeMatchTimeout
+			emptyMatch, err := segment.FindStringMatch("")
+			if err != nil {
+				return fmt.Errorf("regex node %q: %w", node.ID, err)
+			}
+			if emptyMatch != nil {
+				return fmt.Errorf("regex node %q must not match an empty URL segment", node.ID)
+			}
 			for _, name := range segment.GetGroupNames() {
 				if _, err := strconv.Atoi(name); err == nil {
 					continue
@@ -270,7 +293,7 @@ func CompileRouteTree(root RouteTreeNode) ([]CompiledRoute, error) {
 			}
 			pattern += "/(?:" + node.Pattern + ")"
 		case "catchAll":
-			if rootNode || !argumentPattern.MatchString(node.Name) || node.Value != "" || node.Pattern != "" || captures[node.Name] || len(node.Children) != 0 {
+			if node.Path != "" || !argumentPattern.MatchString(node.Name) || node.Value != "" || node.Pattern != "" || captures[node.Name] || len(node.Children) != 0 {
 				return fmt.Errorf("catch-all node %q must be terminal and have a unique name", node.ID)
 			}
 			captures[node.Name] = true
@@ -279,9 +302,6 @@ func CompileRouteTree(root RouteTreeNode) ([]CompiledRoute, error) {
 			return fmt.Errorf("route node %q has unknown type %q", node.ID, node.Type)
 		}
 		if node.PageID != "" {
-			if !rootNode && len(node.Children) > 0 {
-				return fmt.Errorf("branch node %q cannot reference a page; only route leaves may reference pages", node.ID)
-			}
 			matchPattern := pattern
 			if matchPattern == "" {
 				matchPattern = "/"
@@ -297,13 +317,93 @@ func CompileRouteTree(root RouteTreeNode) ([]CompiledRoute, error) {
 		}
 		return nil
 	}
-	if err := walk(root, "", map[string]bool{}, true); err != nil {
+	if root.Type == "site" {
+		if strings.TrimSpace(root.ID) == "" || root.PageID != "" || root.Path != "" || root.Value != "" || root.Name != "" || root.Pattern != "" {
+			return nil, errors.New("site route tree root must be an unrendered virtual node")
+		}
+		seen[root.ID] = true
+		for _, child := range root.Children {
+			if err := walk(child, "", map[string]bool{}, true); err != nil {
+				return nil, err
+			}
+		}
+	} else if err := walk(root, "", map[string]bool{}, true); err != nil {
 		return nil, err
 	}
 	if len(routes) == 0 {
 		return nil, errors.New("route tree must contain at least one page")
 	}
 	return CompileRoutes(routes)
+}
+
+// compilePathRoot parses the user-facing absolute-path syntax used by a root
+// route: static segments, :named parameters, ~segment-regex, and *catch-all.
+// Regex applies to exactly one segment and may expose named captures.
+func compilePathRoot(path string) (string, map[string]bool, error) {
+	if path == "/" {
+		return "", map[string]bool{}, nil
+	}
+	if len(path) < 2 || len(path) > 500 || path[0] != '/' || strings.HasSuffix(path, "/") || strings.Contains(path, "#") {
+		return "", nil, errors.New("root path must be an absolute URL path without a trailing slash, query, or fragment")
+	}
+	segments := strings.Split(path[1:], "/")
+	captures := make(map[string]bool)
+	var pattern strings.Builder
+	for index, segment := range segments {
+		if segment == "" {
+			return "", nil, errors.New("root path cannot contain empty segments")
+		}
+		pattern.WriteByte('/')
+		switch {
+		case strings.HasPrefix(segment, ":"):
+			name := strings.TrimPrefix(segment, ":")
+			if !argumentPattern.MatchString(name) || captures[name] {
+				return "", nil, fmt.Errorf("root path has an invalid or duplicate parameter %q", name)
+			}
+			captures[name] = true
+			pattern.WriteString("(?<" + name + ">[^/]+)")
+		case strings.HasPrefix(segment, "*"):
+			name := strings.TrimPrefix(segment, "*")
+			if index != len(segments)-1 || !argumentPattern.MatchString(name) || captures[name] {
+				return "", nil, fmt.Errorf("root path catch-all %q must be a unique final segment", name)
+			}
+			captures[name] = true
+			pattern.WriteString("(?<" + name + ">.+)")
+		case strings.HasPrefix(segment, "~"):
+			segmentRegex := strings.TrimPrefix(segment, "~")
+			if segmentRegex == "" || strings.Contains(segmentRegex, "/") {
+				return "", nil, errors.New("root path regex segment cannot be empty")
+			}
+			compiled, err := regexp2.Compile(`\A(?:`+segmentRegex+`)\z`, regexp2.None)
+			if err != nil {
+				return "", nil, fmt.Errorf("invalid root path regex: %w", err)
+			}
+			compiled.MatchTimeout = routeMatchTimeout
+			emptyMatch, err := compiled.FindStringMatch("")
+			if err != nil {
+				return "", nil, fmt.Errorf("invalid root path regex: %w", err)
+			}
+			if emptyMatch != nil {
+				return "", nil, errors.New("root path regex must not match an empty URL segment")
+			}
+			for _, name := range compiled.GetGroupNames() {
+				if _, err := strconv.Atoi(name); err == nil {
+					continue
+				}
+				if !argumentPattern.MatchString(name) || captures[name] {
+					return "", nil, fmt.Errorf("root path regex has an invalid or duplicate capture %q", name)
+				}
+				captures[name] = true
+			}
+			pattern.WriteString("(?:" + segmentRegex + ")")
+		default:
+			if segment == "." || segment == ".." || strings.ContainsAny(segment, "/?#") {
+				return "", nil, errors.New("root path contains an invalid static segment")
+			}
+			pattern.WriteString(regexp.QuoteMeta(segment))
+		}
+	}
+	return pattern.String(), captures, nil
 }
 
 func cloneSet(input map[string]bool) map[string]bool {

@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -165,7 +166,12 @@ type ListFilter struct {
 	Limit           int
 }
 
-func (s *Service) List(ctx context.Context, key string, filter ListFilter) ([]Submission, string, []string, error) {
+type FieldDefinition struct {
+	Key   string `json:"key"`
+	Label string `json:"label"`
+}
+
+func (s *Service) List(ctx context.Context, key string, filter ListFilter) ([]Submission, string, []FieldDefinition, error) {
 	feature, form, fields, err := s.formContext(ctx, filter.Environment, key)
 	if err != nil {
 		return nil, "", nil, err
@@ -201,7 +207,7 @@ func (s *Service) List(ctx context.Context, key string, filter ListFilter) ([]Su
 }
 
 // Export returns a capped result set and the searchable field names for CSV.
-func (s *Service) Export(ctx context.Context, key string, filter ListFilter) ([]Submission, []string, error) {
+func (s *Service) Export(ctx context.Context, key string, filter ListFilter) ([]Submission, []FieldDefinition, error) {
 	_, form, fields, err := s.formContext(ctx, filter.Environment, key)
 	if err != nil {
 		return nil, nil, err
@@ -243,7 +249,7 @@ func (s *Service) Delete(ctx context.Context, id uuid.UUID) error {
 	return translateDBError(s.repo.Delete(ctx, id))
 }
 
-func (s *Service) formContext(ctx context.Context, env environment.Environment, key string) (features.Feature, FormSchema, []string, error) {
+func (s *Service) formContext(ctx context.Context, env environment.Environment, key string) (features.Feature, FormSchema, []FieldDefinition, error) {
 	feature, err := s.featureRepo.GetByKey(ctx, key)
 	if err != nil {
 		return features.Feature{}, FormSchema{}, nil, err
@@ -252,12 +258,30 @@ func (s *Service) formContext(ctx context.Context, env environment.Environment, 
 		return features.Feature{}, FormSchema{}, nil, &ValidationError{Message: "Feature не является формой"}
 	}
 	if s.schemas != nil {
-		schemaID, schema, err := s.schemas.FormSchema(ctx, env, key)
+		if env == "" {
+			devID, devSchema, devErr := s.schemas.FormSchema(ctx, environment.Dev, key)
+			prodID, prodSchema, prodErr := s.schemas.FormSchema(ctx, environment.Prod, key)
+			if devErr != nil && prodErr != nil {
+				return features.Feature{}, FormSchema{}, nil, devErr
+			}
+
+			schemaID, schema, schemaEnv := devID, devSchema, environment.Dev
+			if devErr != nil {
+				schemaID, schema, schemaEnv = prodID, prodSchema, environment.Prod
+			}
+			fields := mergeSchemaFields(
+				fieldsForSchema(devSchema, devErr),
+				fieldsForSchema(prodSchema, prodErr),
+			)
+			return feature, FormSchema{FeatureID: feature.ID, FeatureKey: feature.Key, VersionID: schemaID, Schema: schema, Environment: schemaEnv}, fields, nil
+		}
+		schemaEnv := env
+		schemaID, schema, err := s.schemas.FormSchema(ctx, schemaEnv, key)
 		if err != nil {
 			return features.Feature{}, FormSchema{}, nil, err
 		}
 		fields := schemaFields(schema)
-		return feature, FormSchema{FeatureID: feature.ID, FeatureKey: feature.Key, VersionID: schemaID, Schema: schema, Environment: env}, fields, nil
+		return feature, FormSchema{FeatureID: feature.ID, FeatureKey: feature.Key, VersionID: schemaID, Schema: schema, Environment: schemaEnv}, fields, nil
 	}
 	var schema json.RawMessage
 	var schemaID uuid.UUID
@@ -288,7 +312,36 @@ func (s *Service) formContext(ctx context.Context, env environment.Environment, 
 	return feature, FormSchema{FeatureID: feature.ID, FeatureKey: feature.Key, VersionID: schemaID, Version: schemaVersion, Schema: schema, Environment: env}, fields, nil
 }
 
-func schemaFields(schema json.RawMessage) []string {
+func fieldsForSchema(schema json.RawMessage, err error) []FieldDefinition {
+	if err != nil {
+		return nil
+	}
+	return schemaFields(schema)
+}
+
+func mergeSchemaFields(groups ...[]FieldDefinition) []FieldDefinition {
+	byKey := make(map[string]FieldDefinition)
+	for _, fields := range groups {
+		for _, field := range fields {
+			if existing, ok := byKey[field.Key]; ok {
+				if strings.TrimSpace(existing.Label) == "" {
+					existing.Label = field.Label
+					byKey[field.Key] = existing
+				}
+				continue
+			}
+			byKey[field.Key] = field
+		}
+	}
+	fields := make([]FieldDefinition, 0, len(byKey))
+	for _, field := range byKey {
+		fields = append(fields, field)
+	}
+	sort.Slice(fields, func(i, j int) bool { return fields[i].Key < fields[j].Key })
+	return fields
+}
+
+func schemaFields(schema json.RawMessage) []FieldDefinition {
 	if len(schema) == 0 {
 		return nil
 	}
@@ -299,28 +352,36 @@ func schemaFields(schema json.RawMessage) []string {
 		return nil
 	}
 	props, _ := root["properties"].(map[string]any)
-	fields := make([]string, 0, len(props))
+	fields := make([]FieldDefinition, 0, len(props))
 	for name, raw := range props {
 		prop, _ := raw.(map[string]any)
 		typ, _ := prop["type"].(string)
 		switch typ {
 		case "string", "number", "integer", "boolean", "":
-			fields = append(fields, name)
+			label, _ := prop["title"].(string)
+			if strings.TrimSpace(label) == "" {
+				label = name
+			}
+			fields = append(fields, FieldDefinition{Key: name, Label: label})
 		}
 	}
-	sort.Strings(fields)
+	sort.Slice(fields, func(i, j int) bool { return fields[i].Key < fields[j].Key })
 	return fields
 }
 
-func chooseSearchFields(fields []string, requested string) ([]string, error) {
+func chooseSearchFields(fields []FieldDefinition, requested string) ([]string, error) {
 	if requested == "" {
-		if len(fields) > 10 {
-			return fields[:10], nil
+		keys := make([]string, len(fields))
+		for i, field := range fields {
+			keys[i] = field.Key
 		}
-		return fields, nil
+		if len(keys) > 10 {
+			return keys[:10], nil
+		}
+		return keys, nil
 	}
 	for _, field := range fields {
-		if field == requested {
+		if field.Key == requested {
 			return []string{requested}, nil
 		}
 	}

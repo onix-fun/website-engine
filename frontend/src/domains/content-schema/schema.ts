@@ -427,6 +427,7 @@ function parseField(
     required,
     nullable,
     isPrivate: raw["x-private"] === true,
+    mediaProfile: isRecord(raw["x-media"]) ? raw["x-media"] : undefined,
     placeholder: stringValue(ui.placeholder),
     defaultValue:
       typeof raw.default === "string"
@@ -524,10 +525,18 @@ function parseField(
       });
     }
     if (items.format === "media") {
-      return createField("array", { ...base, itemType: "media" });
+      return createField("array", {
+        ...base,
+        itemType: "media",
+        itemMediaProfile: isRecord(items["x-media"]) ? items["x-media"] : undefined,
+      });
     }
     if (items.format === "file") {
-      return createField("array", { ...base, itemType: "file" });
+      return createField("array", {
+        ...base,
+        itemType: "file",
+        itemMediaProfile: isRecord(items["x-media"]) ? items["x-media"] : undefined,
+      });
     }
     const itemType: ArrayItemType =
       itemTypeRaw === "number" ||

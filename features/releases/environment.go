@@ -51,18 +51,15 @@ func CurrentRevision(err error) (int64, bool) {
 type EnvironmentInput struct {
 	Name          *string
 	PublicBaseURL *string
-	Domains       *[]string
 	CORSOrigins   *[]string
-	TLSEnabled    *bool
 	Revision      int64
 }
 
-var domainLimit = 32
+const corsOriginLimit = 32
 
 // UpdateEnvironment stores the editable environment settings and returns the
-// fresh state. Values are validated: domains are bare host names, CORS
-// origins are absolute http(s) URLs or "*", and the public base URL must be
-// an absolute URL.
+// fresh state. CORS origins are absolute http(s) URLs or "*", and the public
+// base URL must be an absolute URL.
 func (s *Service) UpdateEnvironment(ctx context.Context, env environment.Environment, in EnvironmentInput) (EnvironmentState, error) {
 	if !env.Valid() {
 		return EnvironmentState{}, &ValidationError{Message: "environment must be dev or prod"}
@@ -87,28 +84,9 @@ func (s *Service) UpdateEnvironment(ctx context.Context, env environment.Environ
 		}
 		base = &clean
 	}
-	var domains, origins *[]string
-	if in.Domains != nil {
-		list := make([]string, 0, domainLimit)
-		for _, d := range *in.Domains {
-			d = sanitizeDomain(d)
-			if d == "" {
-				continue
-			}
-			if len(d) > 253 {
-				return EnvironmentState{}, &ValidationError{Message: fmt.Sprintf("domain %q is too long", d)}
-			}
-			if len(list) >= domainLimit {
-				return EnvironmentState{}, &ValidationError{Message: fmt.Sprintf("at most %d domains are allowed", domainLimit)}
-			}
-			if !slices.Contains(list, d) {
-				list = append(list, d)
-			}
-		}
-		domains = &list
-	}
+	var origins *[]string
 	if in.CORSOrigins != nil {
-		list := make([]string, 0, domainLimit)
+		list := make([]string, 0, corsOriginLimit)
 		for _, o := range *in.CORSOrigins {
 			o = strings.TrimRight(strings.TrimSpace(o), "/")
 			if o == "" {
@@ -121,8 +99,8 @@ func (s *Service) UpdateEnvironment(ctx context.Context, env environment.Environ
 				}
 				o = strings.TrimRight(u.Scheme+"://"+u.Host, "/") + strings.TrimSuffix(u.Path, "/")
 			}
-			if len(list) >= domainLimit {
-				return EnvironmentState{}, &ValidationError{Message: fmt.Sprintf("at most %d CORS origins are allowed", domainLimit)}
+			if len(list) >= corsOriginLimit {
+				return EnvironmentState{}, &ValidationError{Message: fmt.Sprintf("at most %d CORS origins are allowed", corsOriginLimit)}
 			}
 			if !slices.Contains(list, o) {
 				list = append(list, o)
@@ -131,47 +109,13 @@ func (s *Service) UpdateEnvironment(ctx context.Context, env environment.Environ
 		origins = &list
 	}
 
-	// Domains must be unique across environments; otherwise HTTPS routing
-	// would be ambiguous (two sites for one host).
-	if domains != nil {
-		if err := s.failIfDuplicateDomains(ctx, env, *domains); err != nil {
-			return EnvironmentState{}, err
-		}
-	}
-
-	updated, err := s.repo.UpdateEnvironment(ctx, env, name, base, domains, origins, in.TLSEnabled, in.Revision)
+	updated, err := s.repo.UpdateEnvironment(ctx, env, name, base, origins, in.Revision)
 	if err != nil {
 		return EnvironmentState{}, err
 	}
 	// The CORS cache must not serve stale origins after an update.
 	s.cors.Invalidate()
 	return updated, nil
-}
-
-// failIfDuplicateDomains rejects hosts already routed to another environment.
-func (s *Service) failIfDuplicateDomains(ctx context.Context, env environment.Environment, domains []string) error {
-	if len(domains) == 0 {
-		return nil
-	}
-	states, err := s.repo.Environments(ctx)
-	if err != nil {
-		return err
-	}
-	for _, st := range states {
-		if st.Key == env {
-			continue
-		}
-		for _, existing := range st.Domains {
-			for _, candidate := range domains {
-				if strings.EqualFold(existing, candidate) {
-					return &ValidationError{
-						Message: fmt.Sprintf("domain %q already belongs to the %s environment", candidate, st.Key),
-					}
-				}
-			}
-		}
-	}
-	return nil
 }
 
 func sanitizeName(raw string) string {
@@ -181,25 +125,6 @@ func sanitizeName(raw string) string {
 		name = string(runes[:200])
 	}
 	return name
-}
-
-// sanitizeDomain lowercases a bare host name and rejects schemes, paths,
-// ports and wildcard labels to keep the SNI/host routing unambiguous.
-func sanitizeDomain(raw string) string {
-	d := strings.TrimSpace(raw)
-	d = strings.TrimPrefix(strings.TrimPrefix(d, "https://"), "http://")
-	d = strings.TrimSuffix(d, "/")
-	if strings.Contains(d, "/") {
-		return ""
-	}
-	if i := strings.LastIndex(d, ":"); i > strings.LastIndex(d, "]") {
-		d = d[:i]
-	}
-	d = strings.ToLower(d)
-	if d == "" || strings.ContainsAny(d, " *") {
-		return ""
-	}
-	return d
 }
 
 // CorsSource serves the per-environment public CORS allow-list from

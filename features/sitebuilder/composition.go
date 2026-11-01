@@ -16,12 +16,13 @@ type SiteConfig struct {
 	RouteTree     RouteTreeNode `json:"routeTree"`
 }
 
-// RouteTreeNode is one URL segment in the ordered route tree. A node may
-// resolve a page and still have children, so /section and /section/item can
-// share the same prefix.
+// RouteTreeNode is one ordered URL route. A path node defines a complete root
+// URL, while its children append individual segments. Any node may resolve a
+// page and still have children, so /section and /section/item can share a prefix.
 type RouteTreeNode struct {
 	ID       string          `json:"id"`
 	Type     string          `json:"type"`
+	Path     string          `json:"path,omitempty"`
 	Value    string          `json:"value,omitempty"`
 	Name     string          `json:"name,omitempty"`
 	Pattern  string          `json:"pattern,omitempty"`
@@ -102,8 +103,14 @@ func ParseSiteConfig(raw []byte) (SiteConfig, error) {
 }
 
 func (cfg SiteConfig) Validate(builds BuildLookup) error {
-	if cfg.FormatVersion != 2 {
-		return errors.New("formatVersion must be 2")
+	if cfg.FormatVersion != 2 && cfg.FormatVersion != 3 {
+		return errors.New("formatVersion must be 2 or 3")
+	}
+	if cfg.FormatVersion == 2 && cfg.RouteTree.Type != "index" {
+		return errors.New("formatVersion 2 requires an index route tree root")
+	}
+	if cfg.FormatVersion == 3 && cfg.RouteTree.Type != "site" {
+		return errors.New("formatVersion 3 requires a site route tree root")
 	}
 	if len(cfg.Pages) == 0 {
 		return errors.New("at least one page is required")
@@ -196,6 +203,9 @@ func (cfg SiteConfig) Validate(builds BuildLookup) error {
 				availableCaptures[capture] = true
 			}
 			for name, binding := range placement.Arguments {
+				if schemaPropertyFormat(info.Manifest.Arguments, name) == "media" && binding.Source != "literal" {
+					return fmt.Errorf("placement %q must bind media argument %q to a selected file", placement.ID, name)
+				}
 				if binding.Source == "path" && !availableCaptures[binding.PathArg] {
 					return fmt.Errorf("placement %q maps %q to unavailable path parameter %q", placement.ID, name, binding.PathArg)
 				}
@@ -307,6 +317,18 @@ func schemaPropertyType(schema json.RawMessage, field string) string {
 	}
 	_ = json.Unmarshal(schema, &shape)
 	return shape.Properties[field].Type
+}
+
+func schemaPropertyFormat(schema json.RawMessage, field string) string {
+	var spec struct {
+		Properties map[string]struct {
+			Format string `json:"format"`
+		} `json:"properties"`
+	}
+	if json.Unmarshal(schema, &spec) != nil {
+		return ""
+	}
+	return spec.Properties[field].Format
 }
 
 func hasSchemaProperty(schema json.RawMessage, field string) bool {

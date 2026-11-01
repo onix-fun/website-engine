@@ -1,3 +1,5 @@
+import type { JsonObject } from "@/types";
+
 export type BuilderFieldType =
   | "string"
   | "text"
@@ -51,6 +53,10 @@ export interface SchemaFieldNode {
   required: boolean;
   nullable: boolean;
   isPrivate: boolean;
+  /** Field-level x-media processor profile from the immutable feature manifest. */
+  mediaProfile?: JsonObject;
+  /** x-media profile of array items, when the array directly contains media IDs. */
+  itemMediaProfile?: JsonObject;
   placeholder: string;
   defaultValue: string;
   minLength?: number;

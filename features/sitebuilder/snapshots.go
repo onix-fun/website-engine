@@ -10,12 +10,14 @@ import (
 	"net/url"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	featuremedia "websiteengine/features/media"
 	"websiteengine/pkg/environment"
 	"websiteengine/pkg/platform/validate"
 	publicruntime "websiteengine/pkg/runtime"
@@ -61,9 +63,11 @@ type PinnedAsset struct {
 }
 
 type SnapshotPayload struct {
-	FormatVersion int           `json:"formatVersion"`
-	Config        SiteConfig    `json:"config"`
-	Builds        []PinnedBuild `json:"builds"`
+	FormatVersion        int           `json:"formatVersion"`
+	Config               SiteConfig    `json:"config"`
+	Builds               []PinnedBuild `json:"builds"`
+	DesignSystemRevision int64         `json:"designSystemRevision,omitempty"`
+	DesignSystem         *DesignSystem `json:"designSystem,omitempty"`
 }
 
 type SnapshotContent struct {
@@ -97,7 +101,13 @@ type RuntimeComposition struct {
 	RouteArgs       map[string]string          `json:"routeArgs,omitempty"`
 	Page            Page                       `json:"page"`
 	SharedStyleURLs []string                   `json:"sharedStyleUrls,omitempty"`
+	ThemeStyleURL   string                     `json:"themeStyleUrl,omitempty"`
+	SystemAssets    RuntimeSystemAssets        `json:"systemAssets,omitempty"`
 	Placements      []PlacementRuntime         `json:"placements"`
+}
+
+type RuntimeSystemAssets struct {
+	LogoURL string `json:"logoUrl,omitempty"`
 }
 
 type CollectionPage struct {
@@ -110,27 +120,35 @@ type CollectionPage struct {
 // It deliberately exposes the schema shipped with the pinned build rather
 // than a mutable feature draft.
 type ContentFeature struct {
-	ID         uuid.UUID       `json:"id"`
-	Key        string          `json:"key"`
-	Name       string          `json:"name"`
-	Mode       string          `json:"mode"`
-	Version    string          `json:"version"`
-	Schema     json.RawMessage `json:"schema"`
-	Settings   json.RawMessage `json:"settingsSchema,omitempty"`
-	Submission json.RawMessage `json:"submissionSchema,omitempty"`
+	ID          uuid.UUID       `json:"id"`
+	Key         string          `json:"key"`
+	Name        string          `json:"name"`
+	Mode        string          `json:"mode"`
+	Version     string          `json:"version"`
+	BuildDigest string          `json:"buildDigest"`
+	Schema      json.RawMessage `json:"schema"`
+	Settings    json.RawMessage `json:"settingsSchema,omitempty"`
+	Submission  json.RawMessage `json:"submissionSchema,omitempty"`
 }
 
 type SnapshotService struct {
-	pool   *pgxpool.Pool
-	builds *BuildService
+	pool      *pgxpool.Pool
+	builds    *BuildService
+	media     *featuremedia.Service
+	previewMu sync.Mutex
+	previews  map[string]designPreview
 }
 
 func NewSnapshotService(pool *pgxpool.Pool, builds *BuildService) *SnapshotService {
-	return &SnapshotService{pool: pool, builds: builds}
+	return &SnapshotService{pool: pool, builds: builds, previews: map[string]designPreview{}}
+}
+
+func (s *SnapshotService) SetMediaService(service *featuremedia.Service) {
+	s.media = service
 }
 
 func (s *SnapshotService) GetDraft(ctx context.Context) (DraftState, error) {
-	if _, err := s.pool.Exec(ctx, `INSERT INTO site_draft_config (id,config,revision) VALUES (TRUE,'{"formatVersion":2,"pages":[{"id":"home","name":"Главная","kind":"page","placements":[]}],"routeTree":{"id":"root","type":"index","pageId":"home","children":[]}}'::jsonb,1) ON CONFLICT (id) DO NOTHING`); err != nil {
+	if _, err := s.pool.Exec(ctx, `INSERT INTO site_draft_config (id,config,revision) VALUES (TRUE,'{"formatVersion":3,"pages":[{"id":"home","name":"Главная","kind":"page","placements":[]}],"routeTree":{"id":"site","type":"site","children":[{"id":"home-route","type":"path","path":"/","pageId":"home","children":[]}]}}'::jsonb,1) ON CONFLICT (id) DO NOTHING`); err != nil {
 		return DraftState{}, err
 	}
 	var state DraftState
@@ -157,7 +175,7 @@ func (s *SnapshotService) SaveDraft(ctx context.Context, actor uuid.UUID, expect
 		return DraftState{}, err
 	}
 	defer func() { _ = tx.Rollback(context.Background()) }()
-	if _, err := tx.Exec(ctx, `INSERT INTO site_draft_config (id,config,revision,updated_by) VALUES (TRUE,'{"formatVersion":2,"pages":[{"id":"home","name":"Главная","kind":"page","placements":[]}],"routeTree":{"id":"root","type":"index","pageId":"home","children":[]}}'::jsonb,1,$1) ON CONFLICT (id) DO NOTHING`, actor); err != nil {
+	if _, err := tx.Exec(ctx, `INSERT INTO site_draft_config (id,config,revision,updated_by) VALUES (TRUE,'{"formatVersion":3,"pages":[{"id":"home","name":"Главная","kind":"page","placements":[]}],"routeTree":{"id":"site","type":"site","children":[{"id":"home-route","type":"path","path":"/","pageId":"home","children":[]}]}}'::jsonb,1,$1) ON CONFLICT (id) DO NOTHING`, actor); err != nil {
 		return DraftState{}, err
 	}
 	var current int64
@@ -182,6 +200,9 @@ func (s *SnapshotService) Publish(ctx context.Context, actor uuid.UUID, name str
 	if _, err := s.GetMetadata(ctx); err != nil {
 		return SnapshotRecord{}, err
 	}
+	if _, err := s.GetDesignSystem(ctx); err != nil {
+		return SnapshotRecord{}, err
+	}
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return SnapshotRecord{}, err
@@ -189,6 +210,10 @@ func (s *SnapshotService) Publish(ctx context.Context, actor uuid.UUID, name str
 	defer func() { _ = tx.Rollback(context.Background()) }()
 	var metadataRevision int64
 	if err := tx.QueryRow(ctx, `SELECT revision FROM site_metadata_state WHERE id=TRUE FOR UPDATE`).Scan(&metadataRevision); err != nil {
+		return SnapshotRecord{}, err
+	}
+	var designRevision int64
+	if err := tx.QueryRow(ctx, `SELECT revision FROM site_design_system_state WHERE id=TRUE FOR UPDATE`).Scan(&designRevision); err != nil {
 		return SnapshotRecord{}, err
 	}
 	var raw []byte
@@ -220,7 +245,18 @@ func (s *SnapshotService) Publish(ctx context.Context, actor uuid.UUID, name str
 	if err := validateDetailKeys(cfg, builds, content); err != nil {
 		return SnapshotRecord{}, fmt.Errorf("%w: %v", ErrInvalid, err)
 	}
-	payload := SnapshotPayload{FormatVersion: 1, Config: cfg, Builds: builds}
+	designState, err := readDesignSystem(ctx, tx)
+	if err != nil {
+		return SnapshotRecord{}, err
+	}
+	if err := validateDesignSystemMedia(ctx, tx, designState.Draft); err != nil {
+		return SnapshotRecord{}, fmt.Errorf("%w: design system: %v", ErrInvalid, err)
+	}
+	if err := s.prepareSnapshotMedia(ctx, cfg, builds, content); err != nil {
+		return SnapshotRecord{}, fmt.Errorf("%w: %v", ErrInvalid, err)
+	}
+	_ = designRevision // The row lock binds the saved theme revision to the snapshot.
+	payload := SnapshotPayload{FormatVersion: 2, Config: cfg, Builds: builds, DesignSystemRevision: designState.Revision, DesignSystem: &designState.Draft}
 	payloadJSON, err := json.Marshal(payload)
 	if err != nil {
 		return SnapshotRecord{}, err
@@ -406,6 +442,12 @@ func (s *SnapshotService) Active(ctx context.Context, env environment.Environmen
 }
 
 func (s *SnapshotService) Runtime(ctx context.Context, env environment.Environment, requestPath string, query url.Values) (RuntimeComposition, error) {
+	if query == nil {
+		query = url.Values{}
+	}
+	query = cloneURLValues(query)
+	previewToken := query.Get("__designPreview")
+	query.Del("__designPreview")
 	record, payload, err := s.Active(ctx, env)
 	if err != nil {
 		return RuntimeComposition{}, err
@@ -437,6 +479,24 @@ func (s *SnapshotService) Runtime(ctx context.Context, env environment.Environme
 		metadata = metadataState.Prod
 	}
 	result := RuntimeComposition{Snapshot: record, Metadata: metadata.ForPage(page.ID), Route: route, RouteArgs: args, Page: page, Placements: []PlacementRuntime{}}
+	if payload.DesignSystem != nil {
+		designSystem, normalizeErr := NormalizeDesignSystem(*payload.DesignSystem)
+		if normalizeErr != nil {
+			return RuntimeComposition{}, normalizeErr
+		}
+		result.ThemeStyleURL = "/api/v2/site-themes/snapshots/" + record.ID.String()
+		result.SystemAssets.LogoURL = systemAssetURL(designSystem.BrandLogoID)
+	}
+	// A preview is a temporary override of the active page composition. It must
+	// also work while previewing a legacy snapshot that predates pinned themes.
+	if previewToken != "" {
+		preview, exists := s.designPreview(previewToken)
+		if !exists {
+			return RuntimeComposition{}, fmt.Errorf("%w: design preview expired", ErrNotFound)
+		}
+		result.ThemeStyleURL = "/api/v2/site-themes/previews/" + previewToken
+		result.SystemAssets.LogoURL = systemAssetURL(preview.BrandLogoID)
+	}
 	sharedStyleSeen := make(map[string]bool)
 	registry := payloadBuildRegistry(payload.Builds)
 	for _, placement := range page.Placements {
@@ -450,6 +510,7 @@ func (s *SnapshotService) Runtime(ctx context.Context, env environment.Environme
 		}
 		var content json.RawMessage
 		var collection string
+		contentSchema := info.Manifest.Content.Schema
 		if placement.CollectionSource != nil {
 			var argumentMap map[string]json.RawMessage
 			_ = json.Unmarshal(arguments, &argumentMap)
@@ -459,7 +520,7 @@ func (s *SnapshotService) Runtime(ctx context.Context, env environment.Environme
 				return RuntimeComposition{}, err
 			}
 			content = entry.Data
-		} else if info.Manifest.Content.Mode == "single" || info.Manifest.Content.Mode == "form" {
+		} else if (info.Manifest.Content.Mode == "single" && manifestHasEditableContent(info.Manifest.Content.Schema)) || info.Manifest.Content.Mode == "form" {
 			var data []byte
 			column := environmentContentColumn(env)
 			err := s.pool.QueryRow(ctx, `SELECT v.data FROM features f JOIN feature_entries e ON e.feature_id=f.id JOIN feature_entry_versions v ON v.id=e.`+column+` WHERE f.key=$1 AND e.single_slot=TRUE AND e.archived_at IS NULL ORDER BY e.created_at,e.id LIMIT 1`, info.Manifest.Key).Scan(&data)
@@ -470,6 +531,7 @@ func (s *SnapshotService) Runtime(ctx context.Context, env environment.Environme
 			}
 		} else if info.Manifest.Content.Mode == "collection" {
 			if len(info.Manifest.Content.SettingsSchema) > 0 {
+				contentSchema = info.Manifest.Content.SettingsSchema
 				var data []byte
 				column := environmentContentColumn(env)
 				err := s.pool.QueryRow(ctx, `SELECT v.data FROM features f JOIN feature_entries e ON e.feature_id=f.id JOIN feature_entry_versions v ON v.id=e.`+column+` WHERE f.key=$1 AND e.single_slot=TRUE AND e.archived_at IS NULL ORDER BY e.created_at,e.id LIMIT 1`, info.Manifest.Key).Scan(&data)
@@ -480,6 +542,18 @@ func (s *SnapshotService) Runtime(ctx context.Context, env environment.Environme
 				}
 			}
 			collection = "/api/v2/content/" + info.Manifest.Key + "/records"
+		}
+		if info.Manifest.EngineAPI == "2" && s.media != nil && len(content) > 0 {
+			content, err = s.media.HydrateContent(ctx, contentSchema, content)
+			if err != nil {
+				return RuntimeComposition{}, fmt.Errorf("hydrate media for feature %s: %w", info.Manifest.Key, err)
+			}
+		}
+		if info.Manifest.EngineAPI == "2" && s.media != nil && len(arguments) > 0 {
+			arguments, err = s.media.HydrateContent(ctx, info.Manifest.Arguments, arguments)
+			if err != nil {
+				return RuntimeComposition{}, fmt.Errorf("hydrate argument media for feature %s: %w", info.Manifest.Key, err)
+			}
 		}
 		styleURLs := make([]string, 0, len(info.Manifest.Styles))
 		for _, style := range info.Manifest.SharedStyles {
@@ -496,6 +570,36 @@ func (s *SnapshotService) Runtime(ctx context.Context, env environment.Environme
 			EntryURL: "/feature-assets/" + info.Digest + "/" + info.Manifest.Entry, StyleURLs: styleURLs, Arguments: arguments, Content: content, Collection: collection, DetailLink: placement.DetailLink})
 	}
 	return result, nil
+}
+
+func systemAssetURL(id string) string {
+	if id == "" {
+		return ""
+	}
+	return "/api/v2/system-assets/" + id
+}
+
+func cloneURLValues(source url.Values) url.Values {
+	clone := make(url.Values, len(source))
+	for key, values := range source {
+		clone[key] = append([]string(nil), values...)
+	}
+	return clone
+}
+
+// MediaReferenced prevents deletion of media pinned by the draft theme,
+// route placements, or any retained snapshot.
+func (s *SnapshotService) MediaReferenced(ctx context.Context, id uuid.UUID) (bool, error) {
+	var referenced bool
+	err := s.pool.QueryRow(ctx, `
+		SELECT EXISTS (
+			SELECT 1 FROM site_design_system_state WHERE draft::text LIKE '%' || $1 || '%'
+			UNION ALL SELECT 1 FROM site_draft_config WHERE config::text LIKE '%' || $1 || '%'
+			UNION ALL SELECT 1 FROM site_snapshots WHERE payload::text LIKE '%' || $1 || '%'
+			UNION ALL SELECT 1 FROM site_snapshot_content WHERE data::text LIKE '%' || $1 || '%'
+		)
+	`, id.String()).Scan(&referenced)
+	return referenced, err
 }
 
 func (s *SnapshotService) Collection(ctx context.Context, env environment.Environment, key, field, value string, offset, limit int) (CollectionPage, error) {
@@ -548,6 +652,12 @@ func (s *SnapshotService) Collection(ctx context.Context, env environment.Enviro
 			return CollectionPage{}, err
 		}
 		item.Data = raw
+		if manifest.EngineAPI == "2" && s.media != nil {
+			item.Data, err = s.media.HydrateContent(ctx, manifest.Content.Schema, item.Data)
+			if err != nil {
+				return CollectionPage{}, fmt.Errorf("hydrate media for collection %s: %w", key, err)
+			}
+		}
 		page.Items = append(page.Items, item)
 	}
 	if err := rows.Err(); err != nil {
@@ -607,6 +717,170 @@ func (s *SnapshotService) ContentSchema(ctx context.Context, env environment.Env
 	return uuid.Nil, "", nil, ErrNotFound
 }
 
+type MediaProfileLookup struct {
+	BuildDigest string
+	Profile     featuremedia.FieldProfile
+	HasProfile  bool
+}
+
+// MediaProfile resolves a field path against the feature build pinned by an
+// environment snapshot. The digest protects an open editor from a concurrent
+// switch to another feature build.
+func (s *SnapshotService) MediaProfile(ctx context.Context, env environment.Environment, key, buildVersion, schemaKind, fieldPath, expectedDigest string) (MediaProfileLookup, error) {
+	var manifest Manifest
+	var digest string
+	if buildVersion != "" {
+		build, exists, err := s.builds.Build(ctx, key, buildVersion)
+		if err != nil {
+			return MediaProfileLookup{}, err
+		}
+		if !exists {
+			return MediaProfileLookup{}, ErrNotFound
+		}
+		if expectedDigest != "" && build.Digest != expectedDigest {
+			return MediaProfileLookup{}, fmt.Errorf("%w: feature build changed; reload the editor", ErrConflict)
+		}
+		if err := json.Unmarshal(build.Manifest, &manifest); err != nil {
+			return MediaProfileLookup{}, err
+		}
+		digest = build.Digest
+	} else {
+		_, payload, err := s.Active(ctx, env)
+		if err != nil {
+			return MediaProfileLookup{}, err
+		}
+		found := false
+		for _, build := range payload.Builds {
+			if build.Key != key {
+				continue
+			}
+			if expectedDigest != "" && build.Digest != expectedDigest {
+				return MediaProfileLookup{}, fmt.Errorf("%w: feature build changed; reload the editor", ErrConflict)
+			}
+			if err := json.Unmarshal(build.Manifest, &manifest); err != nil {
+				return MediaProfileLookup{}, err
+			}
+			digest = build.Digest
+			found = true
+			break
+		}
+		if !found {
+			return MediaProfileLookup{}, ErrNotFound
+		}
+	}
+	var schema json.RawMessage
+	switch schemaKind {
+	case "content":
+		schema = manifest.Content.Schema
+	case "settings":
+		schema = manifest.Content.SettingsSchema
+	case "arguments":
+		schema = manifest.Arguments
+	default:
+		return MediaProfileLookup{}, fmt.Errorf("%w: schemaKind must be content, settings or arguments", ErrInvalid)
+	}
+	if len(schema) == 0 {
+		return MediaProfileLookup{}, ErrNotFound
+	}
+	profile, exists, err := featuremedia.ProfileAtSchema(schema, fieldPath)
+	if err != nil {
+		return MediaProfileLookup{}, fmt.Errorf("%w: %v", ErrInvalid, err)
+	}
+	return MediaProfileLookup{BuildDigest: digest, Profile: profile, HasProfile: exists}, nil
+}
+
+func (s *SnapshotService) prepareSnapshotMedia(ctx context.Context, cfg SiteConfig, builds []PinnedBuild, content []SnapshotContent) error {
+	if s.media == nil {
+		return nil
+	}
+	schemas := make(map[string]json.RawMessage, len(builds))
+	abi := make(map[string]string, len(builds))
+	for _, build := range builds {
+		var manifest Manifest
+		if err := json.Unmarshal(build.Manifest, &manifest); err != nil {
+			return err
+		}
+		schemas[build.Key] = manifest.Content.Schema
+		abi[build.Key] = manifest.EngineAPI
+	}
+	var failures []string
+	for _, build := range builds {
+		if abi[build.Key] != "2" {
+			continue
+		}
+		var manifest Manifest
+		if err := json.Unmarshal(build.Manifest, &manifest); err != nil {
+			return err
+		}
+		if len(manifest.Content.SettingsSchema) == 0 {
+			continue
+		}
+		rows, err := s.pool.Query(ctx, `SELECT v.data FROM features f JOIN feature_entries e ON e.feature_id=f.id JOIN feature_entry_versions v ON v.id=e.dev_version_id WHERE f.key=$1 AND f.status='active' AND e.archived_at IS NULL AND e.dev_version_id IS NOT NULL AND e.single_slot=TRUE`, build.Key)
+		if err != nil {
+			return err
+		}
+		for rows.Next() {
+			var settings []byte
+			if err := rows.Scan(&settings); err != nil {
+				rows.Close()
+				return err
+			}
+			if err := s.media.ValidateContent(ctx, manifest.Content.SettingsSchema, settings, true); err != nil {
+				failures = append(failures, build.Key+" settings: "+err.Error())
+			}
+		}
+		if err := rows.Err(); err != nil {
+			rows.Close()
+			return err
+		}
+		rows.Close()
+	}
+	for _, item := range content {
+		if abi[item.FeatureKey] != "2" {
+			continue
+		}
+		if err := s.media.ValidateContent(ctx, schemas[item.FeatureKey], item.Data, true); err != nil {
+			failures = append(failures, item.FeatureKey+" entry "+item.EntryID.String()+": "+err.Error())
+		}
+	}
+	buildByID := make(map[string]Manifest, len(builds))
+	for _, build := range builds {
+		var manifest Manifest
+		if err := json.Unmarshal(build.Manifest, &manifest); err != nil {
+			return err
+		}
+		buildByID[buildID(build.Key, build.Version)] = manifest
+	}
+	for _, page := range cfg.Pages {
+		for _, placement := range page.Placements {
+			manifest, exists := buildByID[buildID(placement.Build.FeatureKey, placement.Build.Version)]
+			if !exists || manifest.EngineAPI != "2" {
+				continue
+			}
+			literal := map[string]json.RawMessage{}
+			for name, binding := range placement.Arguments {
+				if binding.Source == "literal" && len(binding.Value) > 0 {
+					literal[name] = binding.Value
+				}
+			}
+			if len(literal) == 0 {
+				continue
+			}
+			data, err := json.Marshal(literal)
+			if err != nil {
+				return err
+			}
+			if err := s.media.ValidateContent(ctx, manifest.Arguments, data, true); err != nil {
+				failures = append(failures, page.ID+"/"+placement.ID+" arguments: "+err.Error())
+			}
+		}
+	}
+	if len(failures) > 0 {
+		return fmt.Errorf("media renditions are not ready: %s", strings.Join(failures, "; "))
+	}
+	return nil
+}
+
 // SettingsSchema returns collection-level editorial settings pinned by an
 // active site snapshot. It is separate from the per-record collection schema.
 func (s *SnapshotService) SettingsSchema(ctx context.Context, env environment.Environment, key string) (uuid.UUID, string, json.RawMessage, error) {
@@ -645,6 +919,9 @@ func (s *SnapshotService) ContentCatalog(ctx context.Context) ([]ContentFeature,
 		if err := json.Unmarshal(build.Manifest, &manifest); err != nil {
 			return nil, err
 		}
+		if !manifestHasEditableContent(manifest.Content.Schema) && len(manifest.Content.SettingsSchema) == 0 && manifest.Content.Mode != "form" {
+			continue
+		}
 		var id uuid.UUID
 		if err := s.pool.QueryRow(ctx, `SELECT id FROM features WHERE key=$1 AND status='active'`, build.Key).Scan(&id); err != nil {
 			if errors.Is(err, pgx.ErrNoRows) {
@@ -652,7 +929,7 @@ func (s *SnapshotService) ContentCatalog(ctx context.Context) ([]ContentFeature,
 			}
 			return nil, err
 		}
-		item := ContentFeature{ID: id, Key: build.Key, Name: build.Name, Mode: manifest.Content.Mode, Version: build.Version, Schema: manifest.Content.Schema, Settings: manifest.Content.SettingsSchema}
+		item := ContentFeature{ID: id, Key: build.Key, Name: build.Name, Mode: manifest.Content.Mode, Version: build.Version, BuildDigest: build.Digest, Schema: manifest.Content.Schema, Settings: manifest.Content.SettingsSchema}
 		if submissionSchema := manifest.SubmissionSchema(); len(submissionSchema) > 0 {
 			item.Submission = submissionSchema
 		}
@@ -660,6 +937,16 @@ func (s *SnapshotService) ContentCatalog(ctx context.Context) ([]ContentFeature,
 	}
 	sort.Slice(items, func(i, j int) bool { return items[i].Name < items[j].Name })
 	return items, nil
+}
+
+func manifestHasEditableContent(raw json.RawMessage) bool {
+	var schema struct {
+		Properties map[string]json.RawMessage `json:"properties"`
+	}
+	if err := json.Unmarshal(raw, &schema); err != nil {
+		return len(raw) > 0
+	}
+	return len(schema.Properties) > 0
 }
 
 func (s *SnapshotService) findEnvironmentRecord(ctx context.Context, env environment.Environment, key, field, value string) (SnapshotContent, error) {
@@ -752,6 +1039,13 @@ func (s *SnapshotService) captureContent(ctx context.Context, tx pgx.Tx, builds 
 		var manifest Manifest
 		if err := json.Unmarshal(build.Manifest, &manifest); err != nil {
 			return nil, err
+		}
+		// A single-mode feature may intentionally contain no editorial data and
+		// receive all of its inputs through placement arguments (for example a
+		// page background). Ignore any historical single record left by an older
+		// manifest so that it cannot break publication after that transition.
+		if manifest.Content.Mode == "single" && !manifestHasEditableContent(manifest.Content.Schema) {
+			continue
 		}
 		singleSlot := manifest.Content.Mode == "single" || manifest.Content.Mode == "form"
 		if manifest.Content.Mode == "collection" && len(manifest.Content.SettingsSchema) > 0 {

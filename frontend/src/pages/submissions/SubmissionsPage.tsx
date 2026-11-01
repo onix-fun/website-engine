@@ -152,21 +152,6 @@ export default function SubmissionsPage() {
     [formsQuery.data],
   );
 
-  const activeForm = forms.find((item) => item.key === form) ?? null;
-
-  const formSchemaQuery = useQuery({
-    queryKey: queryKeys.features.draft(activeForm?.id ?? ""),
-    queryFn: ({ signal }) => api.features.draft(activeForm!.id, signal),
-    enabled: Boolean(activeForm),
-  });
-  const formFields = useMemo(
-    () =>
-      parsedSchema(
-        formSchemaQuery.data?.prod?.schema ?? formSchemaQuery.data?.draft?.schema,
-      ).fields,
-    [formSchemaQuery.data],
-  );
-
   const filters = useMemo<SubmissionFilters>(
     () => ({
       environment: environment === "all" ? "" : environment,
@@ -184,6 +169,7 @@ export default function SubmissionsPage() {
   const submissionsQuery = useInfiniteQuery({
     queryKey: queryKeys.submissions.list(form, {
       status,
+      environment,
       field,
       from,
       to,
@@ -203,6 +189,11 @@ export default function SubmissionsPage() {
     getNextPageParam: (lastPage) => lastPage.next_cursor,
     enabled: Boolean(form),
   });
+
+  const formFields = useMemo(
+    () => submissionsQuery.data?.pages[0]?.fields ?? [],
+    [submissionsQuery.data],
+  );
 
   const loaded = useMemo(
     () => submissionsQuery.data?.pages.flatMap((page) => page.items) ?? [],
@@ -284,7 +275,7 @@ export default function SubmissionsPage() {
               <SelectContent>
                 <SelectItem value="none">Все формы</SelectItem>
                 {forms.map((item) => (
-                  <SelectItem key={item.id} value={item.key}>
+                  <SelectItem key={item.key} value={item.key}>
                     {item.name}
                   </SelectItem>
                 ))}
@@ -340,7 +331,7 @@ export default function SubmissionsPage() {
               <SelectContent>
                 <SelectItem value="all">Любое поле</SelectItem>
                 {formFields.map((item) => (
-                  <SelectItem key={item.id} value={item.key}>
+                  <SelectItem key={item.key} value={item.key}>
                     {item.label || item.key}
                   </SelectItem>
                 ))}

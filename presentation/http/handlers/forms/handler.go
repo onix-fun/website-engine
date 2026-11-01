@@ -69,12 +69,12 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 		response.Error(w, r, http.StatusBadRequest, "invalid_query", err.Error())
 		return
 	}
-	items, next, _, err := h.service.List(r.Context(), r.PathValue("key"), filter)
+	items, next, fields, err := h.service.List(r.Context(), r.PathValue("key"), filter)
 	if err != nil {
 		h.writeError(w, r, err)
 		return
 	}
-	response.JSON(w, http.StatusOK, map[string]any{"items": items, "next_cursor": nullable(next)})
+	response.JSON(w, http.StatusOK, map[string]any{"items": items, "next_cursor": nullable(next), "fields": fields})
 }
 
 func (h *Handler) Export(w http.ResponseWriter, r *http.Request) {
@@ -93,7 +93,10 @@ func (h *Handler) Export(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", "submissions-"+r.PathValue("key")+".csv"))
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	cw := csv.NewWriter(w)
-	header := append([]string{"id", "status", "created_at", "updated_at", "processed_by"}, fields...)
+	header := []string{"id", "status", "created_at", "updated_at", "processed_by"}
+	for _, field := range fields {
+		header = append(header, field.Key)
+	}
 	_ = cw.Write(header)
 	for _, s := range items {
 		row := []string{
@@ -109,7 +112,7 @@ func (h *Handler) Export(w http.ResponseWriter, r *http.Request) {
 		dec.UseNumber()
 		_ = dec.Decode(&data)
 		for _, field := range fields {
-			row = append(row, csvValue(data[field]))
+			row = append(row, csvValue(data[field.Key]))
 		}
 		_ = cw.Write(row)
 	}

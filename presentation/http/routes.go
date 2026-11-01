@@ -128,6 +128,9 @@ func NewRouter(d Deps) http.Handler {
 		mux.Handle("PUT /api/v2/admin/site/metadata", jsonUser(d.SiteSnapshots.SaveMetadata))
 		mux.Handle("POST /api/v2/admin/site/metadata/publish", user(d.SiteSnapshots.PublishMetadata))
 		mux.Handle("POST /api/v2/admin/site/metadata/promote", jsonSiteManager(d.SiteSnapshots.PromoteMetadata))
+		mux.Handle("GET /api/v2/admin/site/design-system", siteManager(d.SiteSnapshots.DesignSystem))
+		mux.Handle("PUT /api/v2/admin/site/design-system", jsonSiteManager(d.SiteSnapshots.SaveDesignSystem))
+		mux.Handle("POST /api/v2/admin/site/design-system/preview", jsonSiteManager(d.SiteSnapshots.PreviewDesignSystem))
 		mux.Handle("GET /api/v2/admin/site/snapshots", siteManager(d.SiteSnapshots.List))
 		mux.Handle("POST /api/v2/admin/site/snapshots", jsonSiteManager(d.SiteSnapshots.Publish))
 		mux.Handle("POST /api/v2/admin/site/snapshots/{id}/promote", jsonSiteManager(d.SiteSnapshots.Promote))
@@ -190,13 +193,14 @@ func NewRouter(d Deps) http.Handler {
 
 	// Media administration and public redirect.
 	mux.Handle("POST /api/v1/admin/media", user(d.Media.Upload))
+	mux.Handle("POST /api/v2/admin/media/{id}/renditions/prepare", jsonUser(d.Media.PrepareRendition))
+	mux.Handle("GET /api/v2/admin/media/{id}/renditions/state", user(d.Media.RenditionState))
 	mux.Handle("GET /api/v1/admin/media", user(d.Media.List))
 	mux.Handle("GET /api/v1/admin/media/{id}", user(d.Media.Get))
 	mux.Handle("PATCH /api/v1/admin/media/{id}", jsonUser(d.Media.Update))
 	mux.Handle("GET /api/v1/admin/media/{id}/usage", user(d.Media.Usage))
 	mux.Handle("POST /api/v1/admin/media/{id}/retry", user(d.Media.Retry))
 	mux.Handle("DELETE /api/v1/admin/media/{id}", admin(d.Media.Delete))
-	mux.HandleFunc("GET /media/{key}", d.Media.Redirect)
 
 	// Public content and forms. CORS is opt-in per environment; the legacy
 	// PUBLIC_CORS_ORIGINS value applies to both environments when set.
@@ -211,6 +215,7 @@ func NewRouter(d Deps) http.Handler {
 	if d.CorsResolver != nil {
 		cors = middleware.DynamicCORS(d.CorsResolver, corsByEnv)
 	}
+	mux.Handle("GET /media/{key}", cors(http.HandlerFunc(d.Media.Redirect)))
 	noop := http.HandlerFunc(func(http.ResponseWriter, *http.Request) {})
 	for _, pattern := range []string{
 		"OPTIONS /api/v1/content",
@@ -296,6 +301,9 @@ func NewPublicRouter(d Deps, env environment.Environment) http.Handler {
 		"OPTIONS /api/v1/content/{key}/entries",
 		"OPTIONS /api/v1/forms/{key}/submissions",
 		"OPTIONS /api/v2/runtime",
+		"OPTIONS /api/v2/site-themes/snapshots/{id}",
+		"OPTIONS /api/v2/site-themes/previews/{token}",
+		"OPTIONS /api/v2/system-assets/{id}",
 		"OPTIONS /api/v2/content/{key}/records",
 		"OPTIONS /api/v2/forms/{key}/submissions",
 	} {
@@ -312,10 +320,13 @@ func NewPublicRouter(d Deps, env environment.Environment) http.Handler {
 		cors(middleware.BodyLimit(d.MaxJSONBytes)(formLimiter.Middleware(http.HandlerFunc(d.Forms.Submit)))))
 	if d.SiteSnapshots != nil {
 		mux.Handle("GET /api/v2/runtime", cors(http.HandlerFunc(d.SiteSnapshots.Runtime)))
+		mux.Handle("GET /api/v2/site-themes/snapshots/{id}", cors(http.HandlerFunc(d.SiteSnapshots.SnapshotThemeCSS)))
+		mux.Handle("GET /api/v2/site-themes/previews/{token}", cors(http.HandlerFunc(d.SiteSnapshots.PreviewThemeCSS)))
+		mux.Handle("GET /api/v2/system-assets/{id}", cors(http.HandlerFunc(d.Media.SystemAsset)))
 		mux.Handle("GET /api/v2/content/{key}/records", cors(http.HandlerFunc(d.SiteSnapshots.Collection)))
 		mux.Handle("POST /api/v2/forms/{key}/submissions", cors(middleware.BodyLimit(d.MaxJSONBytes)(formLimiter.Middleware(http.HandlerFunc(d.SiteSnapshots.SubmitForm)))))
 	}
-	mux.HandleFunc("GET /media/{key}", d.Media.Redirect)
+	mux.Handle("GET /media/{key}", cors(http.HandlerFunc(d.Media.Redirect)))
 
 	mux.HandleFunc("/api/", func(w http.ResponseWriter, r *http.Request) {
 		response.Error(w, r, http.StatusNotFound, "not_found", "Маршрут API не найден")

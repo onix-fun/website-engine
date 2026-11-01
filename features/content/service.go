@@ -37,6 +37,7 @@ type Service struct {
 	repo        *Repository
 	featureRepo *features.Repository
 	schemas     SchemaProvider
+	media       MediaValidator
 }
 
 type SchemaProvider interface {
@@ -47,12 +48,20 @@ type SettingsSchemaProvider interface {
 	SettingsSchema(context.Context, environment.Environment, string) (uuid.UUID, string, json.RawMessage, error)
 }
 
+type MediaValidator interface {
+	ValidateContent(context.Context, json.RawMessage, json.RawMessage, bool) error
+}
+
 func NewService(repo *Repository, featureRepo *features.Repository) *Service {
 	return &Service{repo: repo, featureRepo: featureRepo}
 }
 
 func (s *Service) SetSchemaProvider(provider SchemaProvider) {
 	s.schemas = provider
+}
+
+func (s *Service) SetMediaValidator(validator MediaValidator) {
+	s.media = validator
 }
 
 func (s *Service) List(ctx context.Context, featureID uuid.UUID, includeArchived bool, search, rawCursor string, limit int, manualOrder bool) ([]Detail, string, error) {
@@ -441,6 +450,11 @@ func (s *Service) Publish(ctx context.Context, actor principal.Principal, entryI
 	if err := s.validateDataVersion(ctx, tx, schema.Schema, draft.Data); err != nil {
 		return Detail{}, err
 	}
+	if s.media != nil {
+		if err := s.media.ValidateContent(ctx, schema.Schema, draft.Data, true); err != nil {
+			return Detail{}, &ConflictError{Message: "Публикация ожидает готовности медиа: " + err.Error()}
+		}
+	}
 	if entry.ProdVersionID != nil {
 		prod, err := s.repo.VersionByID(ctx, tx, *entry.ProdVersionID)
 		if err != nil {
@@ -506,6 +520,11 @@ func (s *Service) Promote(ctx context.Context, actor principal.Principal, entryI
 	}
 	if err := s.validateDataVersion(ctx, tx, schema.Schema, dev.Data); err != nil {
 		return Detail{}, err
+	}
+	if s.media != nil {
+		if err := s.media.ValidateContent(ctx, schema.Schema, dev.Data, true); err != nil {
+			return Detail{}, &ConflictError{Message: "Продвижение ожидает готовности медиа для prod: " + err.Error()}
+		}
 	}
 	if entry.ProdVersionID != nil {
 		prod, err := s.repo.VersionByID(ctx, tx, *entry.ProdVersionID)

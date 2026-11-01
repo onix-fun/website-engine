@@ -52,9 +52,7 @@ type EnvironmentState struct {
 	Key              environment.Environment `json:"key"`
 	Name             string                  `json:"name"`
 	PublicBaseURL    string                  `json:"public_base_url"`
-	Domains          []string                `json:"domains"`
 	HTTPPort         int                     `json:"http_port"`
-	TLSEnabled       bool                    `json:"tls_enabled"`
 	CORSOrigins      []string                `json:"cors_origins"`
 	ActiveReleaseID  *uuid.UUID              `json:"active_release_id,omitempty"`
 	ActiveSnapshotID *uuid.UUID              `json:"active_snapshot_id,omitempty"`
@@ -158,7 +156,7 @@ func (r *Repository) InsertEvent(ctx context.Context, event Event) error {
 
 func (r *Repository) Environments(ctx context.Context) ([]EnvironmentState, error) {
 	rows, err := r.pool.Query(ctx, `
-		SELECT key, name, public_base_url, domains, http_port, tls_enabled,
+		SELECT key, name, public_base_url, http_port,
 		       cors_origins, active_release_id, active_snapshot_id, revision, updated_at
 		  FROM site_environments ORDER BY key`)
 	if err != nil {
@@ -169,7 +167,7 @@ func (r *Repository) Environments(ctx context.Context) ([]EnvironmentState, erro
 	for rows.Next() {
 		var e EnvironmentState
 		var key string
-		if err := rows.Scan(&key, &e.Name, &e.PublicBaseURL, &e.Domains, &e.HTTPPort, &e.TLSEnabled,
+		if err := rows.Scan(&key, &e.Name, &e.PublicBaseURL, &e.HTTPPort,
 			&e.CORSOrigins, &e.ActiveReleaseID, &e.ActiveSnapshotID, &e.Revision, &e.UpdatedAt); err != nil {
 			return nil, err
 		}
@@ -182,9 +180,9 @@ func (r *Repository) Environments(ctx context.Context) ([]EnvironmentState, erro
 // UpdateEnvironment applies the editable environment settings when the
 // caller-supplied revision matches; otherwise it returns the current revision
 // so the caller can retry. Only the fields the caller provided are updated:
-// name, public base URL, domains, CORS origins and the TLS flag.
+// name, public base URL and CORS origins.
 func (r *Repository) UpdateEnvironment(ctx context.Context, env environment.Environment,
-	name, publicBaseURL *string, domains, corsOrigins *[]string, tlsEnabled *bool, revision int64) (EnvironmentState, error) {
+	name, publicBaseURL *string, corsOrigins *[]string, revision int64) (EnvironmentState, error) {
 	sets := "revision = revision + 1, updated_at = now()"
 	args := []any{}
 	add := func(column string, v any) {
@@ -197,14 +195,8 @@ func (r *Repository) UpdateEnvironment(ctx context.Context, env environment.Envi
 	if publicBaseURL != nil {
 		add("public_base_url", *publicBaseURL)
 	}
-	if domains != nil {
-		add("domains", *domains)
-	}
 	if corsOrigins != nil {
 		add("cors_origins", *corsOrigins)
-	}
-	if tlsEnabled != nil {
-		add("tls_enabled", *tlsEnabled)
 	}
 	args = append(args, revision)
 	revArg := len(args)

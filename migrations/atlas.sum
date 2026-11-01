@@ -1,2 +1,5 @@
-h1:uNkmlLctrYUdMevFnZb3Vf4kIxRy3d0w9jFTp5UH+kY=
+h1:4NjCd1fcoSzAy6Wjih5g6l8OnN4jJ3YJKcCmfJfJRV8=
 0001_init.sql h1:TycfehMRBObO6abllYDLcvYLfmaUBNCS5xhaPljR1X0=
+0002_remove_tls.sql h1:4cuTCB12sT2/lY5Rp0nBUVvFtC1QPZ4OtW3cGqP2qFQ=
+0003_media_renditions.sql h1:kMm0Udy2woNY/mBrZM7SLWeLLn7KDtHYuSK7+72hoUE=
+0004_design_system.sql h1:o/RuuMeYxOIE3kb6mfHaxw4bJRi0fuC28tB5yLb8FwY=

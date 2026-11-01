@@ -116,6 +116,103 @@ func (h *SnapshotsHandler) PromoteMetadata(w http.ResponseWriter, r *http.Reques
 	response.JSON(w, http.StatusOK, state)
 }
 
+func (h *SnapshotsHandler) DesignSystem(w http.ResponseWriter, r *http.Request) {
+	state, err := h.service.GetDesignSystem(r.Context())
+	if err != nil {
+		h.writeError(w, r, err)
+		return
+	}
+	response.JSON(w, http.StatusOK, map[string]any{"state": state, "definitions": sitebuilder.DesignTokenDefinitions()})
+}
+
+type saveDesignSystemRequest struct {
+	Revision     int64           `json:"revision"`
+	DesignSystem json.RawMessage `json:"designSystem"`
+}
+
+func (h *SnapshotsHandler) SaveDesignSystem(w http.ResponseWriter, r *http.Request) {
+	actor, _ := principal.FromContext(r.Context())
+	var req saveDesignSystemRequest
+	if err := response.DecodeJSON(w, r, &req, h.maxJSON); err != nil {
+		response.WriteDecodeError(w, r, err)
+		return
+	}
+	if len(req.DesignSystem) == 0 {
+		response.Error(w, r, http.StatusBadRequest, "invalid_design_system", "Design system is required")
+		return
+	}
+	state, err := h.service.SaveDesignSystem(r.Context(), actor.TokenID, req.Revision, req.DesignSystem)
+	if err != nil {
+		h.writeError(w, r, err)
+		return
+	}
+	response.JSON(w, http.StatusOK, map[string]any{"state": state, "definitions": sitebuilder.DesignTokenDefinitions()})
+}
+
+func (h *SnapshotsHandler) PreviewDesignSystem(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		DesignSystem json.RawMessage `json:"designSystem"`
+	}
+	if err := response.DecodeJSON(w, r, &req, h.maxJSON); err != nil {
+		response.WriteDecodeError(w, r, err)
+		return
+	}
+	token, err := h.service.CreateDesignPreview(r.Context(), req.DesignSystem)
+	if err != nil {
+		h.writeError(w, r, err)
+		return
+	}
+	response.JSON(w, http.StatusCreated, map[string]string{"token": token})
+}
+
+func (h *SnapshotsHandler) SnapshotThemeCSS(w http.ResponseWriter, r *http.Request) {
+	id, err := uuid.Parse(r.PathValue("id"))
+	if err != nil {
+		h.writeThemeError(w, r, err)
+		return
+	}
+	value, err := h.service.ThemeForSnapshot(r.Context(), id)
+	if err != nil {
+		h.writeThemeError(w, r, err)
+		return
+	}
+	h.writeThemeCSS(w, r, value, true)
+}
+
+func (h *SnapshotsHandler) PreviewThemeCSS(w http.ResponseWriter, r *http.Request) {
+	value, ok := h.service.DesignPreview(r.PathValue("token"))
+	if !ok {
+		h.writeThemeError(w, r, sitebuilder.ErrNotFound)
+		return
+	}
+	h.writeThemeCSS(w, r, value, false)
+}
+
+func (h *SnapshotsHandler) writeThemeCSS(w http.ResponseWriter, r *http.Request, value sitebuilder.DesignSystem, immutable bool) {
+	css, err := value.CSS("")
+	if err != nil {
+		h.writeThemeError(w, r, err)
+		return
+	}
+	w.Header().Set("Content-Type", "text/css; charset=utf-8")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	if immutable {
+		w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+	} else {
+		w.Header().Set("Cache-Control", "no-store")
+	}
+	_, _ = w.Write([]byte(css))
+}
+
+func (h *SnapshotsHandler) writeThemeError(w http.ResponseWriter, r *http.Request, err error) {
+	if errors.Is(err, sitebuilder.ErrNotFound) {
+		http.NotFound(w, r)
+		return
+	}
+	h.log.Error("theme stylesheet request failed", "request_id", response.RequestID(r.Context()), "error", err)
+	http.Error(w, "theme stylesheet unavailable", http.StatusInternalServerError)
+}
+
 type publishRequest struct {
 	Name string `json:"name"`
 }

@@ -136,7 +136,7 @@ sleep 1
 echo -n "  prod after rollback: "; curl -sf "$PROD/" | head -c 60 >/dev/null && echo "OK (отдаёт стат)"
 curl -sf "$PROD/api/v1/content/pages" | jq -c '{title: .data.entries[0].data.title}'
 
-step "9. Environment settings via PATCH (CORS + domains)"
+step "9. Environment settings via PATCH (CORS)"
 curl -sf "$API/api/v1/admin/site/environments" -H "$(auth)" > "$TMP/envs.json"
 DREV2=$(jq -r '.items[] | select(.key=="dev") | .revision' "$TMP/envs.json")
 PTS=$(curl -sf -X PATCH "$API/api/v1/admin/site/environments/dev" -H "$(auth)" \

@@ -25,9 +25,9 @@ import {
   Settings,
   Settings2,
   Blocks,
-  FileText,
   GitBranch,
   History,
+  Palette,
   ShieldCheck,
   UserRound,
 } from "lucide-react";
@@ -74,10 +74,10 @@ const homeNav: NavItem[] = [
 ];
 
 const siteSettingsNav: NavItem[] = [
-  { to: "/site/router", label: "Роутер", icon: GitBranch, match: (p) => p === "/site/router" },
+  { to: "/site/pages", label: "Страницы и маршруты", icon: GitBranch, match: (p) => p === "/site/pages" || p === "/site/router" },
   { to: "/site/features", label: "Реестр фичей", icon: Blocks, match: (p) => p === "/site/features" },
-  { to: "/site/pages", label: "Редактор страниц", icon: FileText, match: (p) => p === "/site/pages" },
   { to: "/site/snapshots", label: "Снапшоты", icon: History, match: (p) => p === "/site/snapshots" },
+  { to: "/site/design-system", label: "Дизайн-система", icon: Palette, match: (p) => p === "/site/design-system" },
 ];
 
 const administrationNav: NavItem[] = [
@@ -321,6 +321,9 @@ function SidebarContent({
 }
 
 const segmentLabels: Record<string, string> = {
+  site: "Сайт",
+  router: "Страницы и маршруты",
+  pages: "Страницы и маршруты",
   features: "Разделы",
   new: "Создание",
   schema: "Схема",
@@ -406,6 +409,7 @@ function Breadcrumbs() {
 export function AppShell() {
   const { principal } = useAuth();
   const location = useLocation();
+  const routeCanvas = location.pathname === "/site/pages" || location.pathname === "/site/router";
   const [collapsed, setCollapsed] = useState(() => {
     try {
       return window.localStorage.getItem(SIDEBAR_KEY) === "true";
@@ -428,7 +432,7 @@ export function AppShell() {
   }, [collapsed]);
 
   return (
-    <div className="flex min-h-dvh bg-background">
+    <div className={`flex bg-background ${routeCanvas ? "h-dvh min-h-0 overflow-hidden" : "min-h-dvh"}`}>
       <a
         href="#main-content"
         onClick={(event) => {
@@ -511,7 +515,7 @@ export function AppShell() {
         <main
           id="main-content"
           tabIndex={-1}
-          className="min-w-0 flex-1 focus-visible:outline-none"
+          className={`min-w-0 flex-1 focus-visible:outline-none ${routeCanvas ? "min-h-0 overflow-hidden" : ""}`}
         >
           <Suspense fallback={<LoadingPage />}>
             <Outlet />

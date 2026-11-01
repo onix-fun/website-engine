@@ -26,8 +26,8 @@ const RolesPage = lazy(() => import("@/pages/access/RolesPage"));
 const SettingsPage = lazy(() => import("@/pages/settings/SettingsPage"));
 const RouterPage = lazy(() => import("@/pages/site/RouterPage"));
 const FeatureRegistryPage = lazy(() => import("@/pages/site/FeatureRegistryPage"));
-const PageEditorPage = lazy(() => import("@/pages/site/PageEditorPage"));
 const SnapshotsPage = lazy(() => import("@/pages/site/SnapshotsPage"));
+const DesignSystemPage = lazy(() => import("@/pages/site/DesignSystemPage"));
 const SiteWorkspace = lazy(() => import("@/pages/site/SiteWorkspace").then((module) => ({ default: module.SiteWorkspace })));
 const SiteMetadataPage = lazy(() => import("@/pages/content/SiteMetadataPage"));
 const EnvironmentSettingsPage = lazy(() => import("@/pages/settings/EnvironmentSettingsPage"));
@@ -130,10 +130,11 @@ export const router = createBrowserRouter(
                 element: <SiteWorkspace />,
                 children: [
                   { index: true, element: <Navigate to="pages" replace /> },
-                  { path: "router", element: <RouterPage /> },
+                  { path: "router", element: <Navigate to="../pages" replace /> },
                   { path: "features", element: <FeatureRegistryPage /> },
-                  { path: "pages", element: <PageEditorPage /> },
+                  { path: "pages", element: <RouterPage /> },
                   { path: "snapshots", element: <SnapshotsPage /> },
+                  { path: "design-system", element: <DesignSystemPage /> },
                 ],
               }],
             },
