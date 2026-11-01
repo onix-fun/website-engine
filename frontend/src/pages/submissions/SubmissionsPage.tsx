@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   useInfiniteQuery,
   useMutation,
@@ -80,22 +80,25 @@ function useSubmissionFilterParams() {
   const archived = searchParams.get("archived") === "1";
   const q = searchParams.get("q") ?? "";
 
-  const update = (values: Record<string, string | null>, replace = false) => {
-    setSearchParams(
-      (current) => {
-        const next = new URLSearchParams(current);
-        Object.entries(values).forEach(([key, value]) => {
-          if (value === null || value === "" || value === "all") {
-            next.delete(key);
-          } else {
-            next.set(key, value);
-          }
-        });
-        return next;
-      },
-      { replace },
-    );
-  };
+  const update = useCallback(
+    (values: Record<string, string | null>, replace = false) => {
+      setSearchParams(
+        (current) => {
+          const next = new URLSearchParams(current);
+          Object.entries(values).forEach(([key, value]) => {
+            if (value === null || value === "" || value === "all") {
+              next.delete(key);
+            } else {
+              next.set(key, value);
+            }
+          });
+          return next;
+        },
+        { replace },
+      );
+    },
+    [setSearchParams],
+  );
 
   return { form, environment, status, field, from, to, sort, archived, q, update };
 }
@@ -151,6 +154,11 @@ export default function SubmissionsPage() {
     () => formsQuery.data?.items.filter((item) => item.type === "form") ?? [],
     [formsQuery.data],
   );
+
+  useEffect(() => {
+    if (form || formsQuery.isLoading || forms.length !== 1) return;
+    update({ form: forms[0].key }, true);
+  }, [form, forms, formsQuery.isLoading, update]);
 
   const filters = useMemo<SubmissionFilters>(
     () => ({
