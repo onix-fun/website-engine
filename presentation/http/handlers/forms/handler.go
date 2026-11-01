@@ -74,6 +74,12 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 		h.writeError(w, r, err)
 		return
 	}
+	if items == nil {
+		items = []forms.Submission{}
+	}
+	if fields == nil {
+		fields = []forms.FieldDefinition{}
+	}
 	response.JSON(w, http.StatusOK, map[string]any{"items": items, "next_cursor": nullable(next), "fields": fields})
 }
 

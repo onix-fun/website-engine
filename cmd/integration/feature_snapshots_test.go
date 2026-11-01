@@ -292,12 +292,12 @@ func TestSnapshotPinnedFormSchemaAndPersistentSubmissions(t *testing.T) {
 		t.Fatalf("unexpected searchable field metadata: %v", fields)
 	}
 	status, emptyProd, _ := env.request(http.MethodGet, "/api/v1/admin/forms/"+key+"/submissions?environment=prod", env.adminToken, nil)
-	prodItems, _ := emptyProd["items"].([]any)
-	prodFields, _ := emptyProd["fields"].([]any)
+	prodItems, itemsOK := emptyProd["items"].([]any)
+	prodFields, fieldsOK := emptyProd["fields"].([]any)
 	if _, _, _, err := env.forms.List(context.Background(), key, forms.ListFilter{Environment: environment.Prod, Limit: 50}); err != nil {
 		t.Fatalf("list submissions through service before prod snapshot is published: %v", err)
 	}
-	if status != http.StatusOK || len(prodItems) != 0 || len(prodFields) != 0 {
+	if status != http.StatusOK || !itemsOK || !fieldsOK || len(prodItems) != 0 || len(prodFields) != 0 {
 		t.Fatalf("list submissions before prod snapshot is published: status=%d body=%v", status, emptyProd)
 	}
 	status, filtered, _ := env.request(http.MethodGet, "/api/v1/admin/forms/"+key+"/submissions?field=name&q=Ada", env.adminToken, nil)
