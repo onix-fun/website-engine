@@ -217,14 +217,14 @@ type publishRequest struct {
 	Name string `json:"name"`
 }
 
-func (h *SnapshotsHandler) Publish(w http.ResponseWriter, r *http.Request) {
+func (h *SnapshotsHandler) Create(w http.ResponseWriter, r *http.Request) {
 	actor, _ := principal.FromContext(r.Context())
 	var req publishRequest
 	if err := response.DecodeJSON(w, r, &req, h.maxJSON); err != nil {
 		response.WriteDecodeError(w, r, err)
 		return
 	}
-	record, err := h.service.Publish(r.Context(), actor.TokenID, strings.TrimSpace(req.Name))
+	record, err := h.service.Create(r.Context(), actor.TokenID, strings.TrimSpace(req.Name))
 	if err != nil {
 		h.writeError(w, r, err)
 		return
@@ -238,18 +238,41 @@ func (h *SnapshotsHandler) List(w http.ResponseWriter, r *http.Request) {
 		response.Error(w, r, http.StatusBadRequest, "invalid_limit", err.Error())
 		return
 	}
-	items, err := h.service.List(r.Context(), limit)
+	var beforeSequence *int64
+	if raw := r.URL.Query().Get("beforeSequence"); raw != "" {
+		sequence, parseErr := strconv.ParseInt(raw, 10, 64)
+		if parseErr != nil || sequence < 1 {
+			response.Error(w, r, http.StatusBadRequest, "invalid_cursor", "beforeSequence должен быть положительным номером снапшота")
+			return
+		}
+		beforeSequence = &sequence
+	}
+	items, err := h.service.List(r.Context(), limit+1, beforeSequence)
 	if err != nil {
 		h.writeError(w, r, err)
 		return
 	}
-	active := map[string]string{"dev": "", "prod": ""}
-	for _, env := range []environment.Environment{environment.Dev, environment.Prod} {
-		if record, _, activeErr := h.service.Active(r.Context(), env); activeErr == nil {
-			active[env.String()] = record.ID.String()
-		}
+	var nextCursor *int64
+	if len(items) > limit {
+		cursor := items[limit-1].Sequence
+		nextCursor = &cursor
+		items = items[:limit]
 	}
-	response.JSON(w, http.StatusOK, map[string]any{"items": items, "active": active})
+	active := map[string]string{"dev": "", "prod": ""}
+	activeSnapshots := map[string]*sitebuilder.SnapshotRecord{"dev": nil, "prod": nil}
+	for _, env := range []environment.Environment{environment.Dev, environment.Prod} {
+		record, _, activeErr := h.service.Active(r.Context(), env)
+		if errors.Is(activeErr, sitebuilder.ErrSnapshotUnavailable) {
+			continue
+		}
+		if activeErr != nil {
+			h.writeError(w, r, activeErr)
+			return
+		}
+		active[env.String()] = record.ID.String()
+		activeSnapshots[env.String()] = &record
+	}
+	response.JSON(w, http.StatusOK, map[string]any{"items": items, "active": active, "activeSnapshots": activeSnapshots, "nextCursor": nextCursor})
 }
 
 func (h *SnapshotsHandler) Promote(w http.ResponseWriter, r *http.Request) {
@@ -268,6 +291,30 @@ func (h *SnapshotsHandler) Promote(w http.ResponseWriter, r *http.Request) {
 
 type rollbackRequest struct {
 	Environment string `json:"environment"`
+}
+
+func (h *SnapshotsHandler) Deploy(w http.ResponseWriter, r *http.Request) {
+	actor, _ := principal.FromContext(r.Context())
+	id, ok := snapshotID(w, r)
+	if !ok {
+		return
+	}
+	var req rollbackRequest
+	if err := response.DecodeJSON(w, r, &req, h.maxJSON); err != nil {
+		response.WriteDecodeError(w, r, err)
+		return
+	}
+	env, err := environment.Parse(req.Environment)
+	if err != nil {
+		response.Error(w, r, http.StatusBadRequest, "invalid_environment", err.Error())
+		return
+	}
+	record, err := h.service.Deploy(r.Context(), actor.TokenID, id, env)
+	if err != nil {
+		h.writeError(w, r, err)
+		return
+	}
+	response.JSON(w, http.StatusOK, record)
 }
 
 func (h *SnapshotsHandler) Rollback(w http.ResponseWriter, r *http.Request) {
@@ -340,7 +387,16 @@ func (h *SnapshotsHandler) Collection(w http.ResponseWriter, r *http.Request) {
 		response.Error(w, r, http.StatusBadRequest, "invalid_limit", "limit must be a non-negative integer")
 		return
 	}
-	page, err := h.service.Collection(r.Context(), environment.FromContext(r.Context()), r.PathValue("key"), r.URL.Query().Get("field"), r.URL.Query().Get("value"), offset, limit)
+	var snapshotID *uuid.UUID
+	if raw := r.URL.Query().Get("snapshot"); raw != "" {
+		parsed, parseErr := uuid.Parse(raw)
+		if parseErr != nil {
+			response.Error(w, r, http.StatusBadRequest, "invalid_snapshot", "snapshot must be a valid snapshot id")
+			return
+		}
+		snapshotID = &parsed
+	}
+	page, err := h.service.Collection(r.Context(), environment.FromContext(r.Context()), snapshotID, r.PathValue("key"), r.URL.Query().Get("field"), r.URL.Query().Get("value"), offset, limit)
 	if err != nil {
 		h.writePublicError(w, r, err)
 		return

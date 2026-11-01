@@ -1015,7 +1015,7 @@ function MediaTable({
 }
 
 export default function MediaPage() {
-  useDocumentTitle("Медиа");
+  useDocumentTitle("Файлы");
   const { q, type, status, sort, from, to, min, max, view, update } =
     useMediaFilterParams();
   const [searchInput, setSearchInput] = useState(q);
@@ -1106,7 +1106,7 @@ export default function MediaPage() {
   return (
     <div className="page-grid">
       <PageHeader
-        title="Медиа"
+        title="Файлы"
         description="Файлы для контента и форм. В документах хранятся ID объектов, поэтому переименование не ломает опубликованные страницы."
         actions={
           <>

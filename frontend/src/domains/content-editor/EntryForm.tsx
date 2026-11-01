@@ -370,7 +370,7 @@ function MediaValue({
               </Button>
             </>
           ) : (
-            <Badge variant="info">Подготовка медиа…</Badge>
+            <Badge variant="warning">Подготовка медиа…</Badge>
           )}
         </div>
       )}

@@ -330,11 +330,17 @@ CSV-экспорт учитывает те же фильтры, значения
 | POST | `/api/v2/admin/feature-builds` | staff | Импорт ESM ZIP-архива с `manifest.json` |
 | GET/PUT | `/api/v2/admin/site/draft` | user/staff | Читать и сохранять визуальную композицию по revision |
 | GET/PUT | `/api/v2/admin/site/design-system` | admin, moderator | Читать/сохранять типизированный черновик темы по revision |
-| POST | `/api/v2/admin/site/design-system/preview` | admin, moderator | Создать краткоживущий токен предпросмотра несохранённой темы |
-| GET | `/api/v2/admin/site/snapshots` | user | История и активные указатели dev/prod |
-| POST | `/api/v2/admin/site/snapshots` | staff | Создать снапшот и переключить dev |
-| POST | `/api/v2/admin/site/snapshots/{id}/promote` | admin | Продвинуть тот же снапшот в prod |
-| POST | `/api/v2/admin/site/snapshots/{id}/rollback` | admin | Вернуть dev или prod на снапшот |
+| GET | `/api/v2/admin/site/snapshots?limit=&beforeSequence=` | admin, moderator | Cursor-страницы истории и активные указатели dev/prod |
+| POST | `/api/v2/admin/site/snapshots` | admin, moderator | Создать новый immutable снапшот; активные среды не переключаются |
+| POST | `/api/v2/admin/site/snapshots/{id}/deploy` | admin, moderator | Развернуть любой снапшот напрямую в dev или production |
+| POST | `/api/v2/admin/site/snapshots/{id}/promote` | admin, moderator | Совместимое действие: prod только для текущего dev-снапшота |
+| POST | `/api/v2/admin/site/snapshots/{id}/rollback` | admin, moderator | Совместимое действие для выбора снапшота в dev или production |
+
+При создании снапшота payload `formatVersion: 3` включает сохранённую композицию страниц, точные версии feature builds, дизайн-систему и неизменяемый набор содержимого. Для одиночного слота и записей коллекций выбирается сохранённый draft, если он есть; иначе версия dev, а при её отсутствии версия production. Содержимое и его порядок входят в digest. Повторная идентичная версия может иметь тот же digest и всё равно создаёт отдельный снапшот. Заявки форм не входят в него.
+
+Список по умолчанию возвращает до 50 записей и `nextCursor` (положительный номер последнего элемента текущей страницы). Следующая страница запрашивается через `beforeSequence=<nextCursor>`. Ответ содержит `items`, `active` (`dev`/`prod` UUID или пустая строка), `activeSnapshots` и `nextCursor`.
+
+`POST /site/snapshots/{id}/deploy` принимает `{"environment":"dev"}` или `{"environment":"prod"}`. Он переключает выбранную среду на указанный снапшот без требования сначала активировать его в dev. Каждая среда может указывать на свою версию.
 
 Публичный runtime использует `GET /api/v2/runtime?path=...`, коллекции — `/api/v2/content/{key}/records`, формы — `POST /api/v2/forms/{key}/submissions`. Данные runtime, версии фич и дизайн-система берутся из активного снапшота.
 
@@ -344,7 +350,7 @@ CSV-экспорт учитывает те же фильтры, значения
 
 Фон страницы задаётся как обязательный media-аргумент размещения фичи `background`. Поэтому разные страницы могут выбрать разные изображения. Поля `format: "media"` с `x-media` подготавливаются по профилю указанной версии сборки; для аргументов профиль можно запросить с `schemaKind=arguments` и `buildVersion`.
 
-Снапшот включает `designSystemRevision` и значения `designSystem`, включая ID шрифтов и общего логотипа. Сохранение темы само по себе не меняет опубликованный сайт: новая тема применяется после публикации снапшота, а предпросмотр использует отдельный краткоживущий `__designPreview` token.
+Снапшот включает `designSystemRevision` и значения `designSystem`, включая ID шрифтов и общего логотипа. Сохранение темы само по себе не меняет сайт в среде; она применяется после создания и развёртывания снапшота. UI предпросмотра удалён; прежние preview API сохранены для совместимости старых клиентов.
 
 Неизменяемые zip-артефакты сайта выкатываются в две среды (`dev`, `prod`);
 legacy API ниже оставлен на переходный период.

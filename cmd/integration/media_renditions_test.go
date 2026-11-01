@@ -59,7 +59,7 @@ func TestMediaRenditionsQueueRetryRestartPublishAndRuntime(t *testing.T) {
 	manifest := manifestFor(featureKey, "1.0.0", "single", schema)
 	manifest["engineApi"] = "2"
 	build := uploadFeatureBuild(t, env, manifest, "export default function Feature() {}")
-	saveAndPublishSnapshot(t, env, singlePageConfig(featureKey, "1.0.0"), "media profile")
+	saveAndDeploySnapshot(t, env, singlePageConfig(featureKey, "1.0.0"), "media profile")
 
 	uploaded := env.uploadMedia("cover.png", minimalPNG(t))
 	mediaID := uploaded["id"].(string)
@@ -124,6 +124,7 @@ func TestMediaRenditionsQueueRetryRestartPublishAndRuntime(t *testing.T) {
 	if status != http.StatusOK {
 		t.Fatalf("publish after renditions are ready: status=%d body=%v", status, published)
 	}
+	saveAndDeploySnapshot(t, env, singlePageConfig(featureKey, "1.0.0"), "media content ready")
 
 	placement := runtimePlacement(t, env, env.devServer.URL, "/")
 	cover := placement["content"].(map[string]any)["cover"].(map[string]any)

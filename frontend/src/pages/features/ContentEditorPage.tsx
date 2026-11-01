@@ -151,7 +151,7 @@ function SaveStateBadge({
 }) {
   if (status === "saving") {
     return (
-      <Badge variant="info">
+      <Badge variant="warning">
         <Loader2 className="h-3 w-3 animate-spin" aria-hidden="true" />
         Сохранение
       </Badge>
@@ -515,6 +515,9 @@ export default function ContentEditorPage() {
             Публикация создаёт новую неизменяемую версию и переключает публичный
             API на неё. Версия сохранится в истории; последующие правки создадут
             новый черновик.
+          </p>
+          <p>
+            Чтобы обновить страницы сайта, сохраните черновик и создайте снапшот в разделе «Сайт → Снапшоты».
           </p>
           {entryQuery.data?.prod && (
             <p>

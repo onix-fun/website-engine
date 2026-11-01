@@ -3,6 +3,7 @@
 .DS_Store
 .gocache/
 frontend/node_modules/
+.playwright-mcp/
 .pnpm-store/
 frontend/dist/
 pkg/static/dist/assets/

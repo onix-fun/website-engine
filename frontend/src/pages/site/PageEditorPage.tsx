@@ -45,7 +45,7 @@ function ArgumentField({ schema, binding, captures, onChange, preparation }: { s
     {source === "path" && <select className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm" value={binding?.source === "path" ? binding.pathArg : captures[0]} onChange={(event) => onChange({ source: "path", pathArg: event.currentTarget.value })}>{captures.map((capture) => <option key={capture} value={capture}>{capture}</option>)}</select>}
     {source === "query" && <div className="space-y-1"><Label className="text-xs text-muted-foreground">Ключ query-строки</Label><Input value={binding?.source === "query" ? binding.queryKey : name} onChange={(event) => onChange({ source: "query", queryKey: event.currentTarget.value })} placeholder="page" /></div>}
     {source === "literal" && schema.format === "media" ? <><Button type="button" variant="outline" className="w-full justify-start" onClick={() => setPickerOpen(true)}>{typeof value === "string" && value ? "Выбрано медиа: " + value : "Выбрать файл"}</Button><MediaPickerDialog open={pickerOpen} onClose={() => setPickerOpen(false)} onSelect={(items) => { const selected = items[0]; if (selected) onChange({ source: "literal", value: selected.id }); }} accept={schema["x-media"]?.accept === "raster-image" ? "raster-image" : "image"} initialSelected={typeof value === "string" && value ? [value] : []} preparation={preparation} /></> : source === "literal" && (schema.enum ? <select className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm" value={String(value ?? "")} onChange={(event) => onChange({ source: "literal", value: event.currentTarget.value })}>{schema.enum.map((option) => <option key={String(option)} value={String(option)}>{String(option)}</option>)}</select> : schema.type === "boolean" ? <select className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm" value={String(value)} onChange={(event) => onChange({ source: "literal", value: event.currentTarget.value === "true" })}><option value="true">Да</option><option value="false">Нет</option></select> : schema.type === "array" ? <Input value={Array.isArray(value) ? value.map(String).join(", ") : ""} onChange={(event) => onChange({ source: "literal", value: event.currentTarget.value.split(",").map((part) => coerceInput(schema.items?.type, part.trim())) })} placeholder="Значения через запятую" /> : <Input type={schema.type === "integer" || schema.type === "number" ? "number" : "text"} value={typeof value === "string" || typeof value === "number" ? String(value) : ""} onChange={(event) => onChange({ source: "literal", value: coerceInput(schema.type, event.currentTarget.value) })} />)}
-    {schema.type === "object" && <p className="text-xs text-amber-700 dark:text-amber-300">Для объектного аргумента задайте поля как простые значения в манифесте фичи.</p>}
+    {schema.type === "object" && <p className="text-xs text-warning">Для объектного аргумента задайте поля как простые значения в манифесте фичи.</p>}
   </div>;
 }
 
@@ -117,7 +117,17 @@ export default function PageEditorPage({ pageId, onBack }: { pageId: string; onB
     changePage(page.id, { placements: [...page.placements, next] });
   };
 
-  if (error) return <ErrorState error={error} title="Не удалось загрузить сборки фич" />;
+  const retryBuilds = async () => {
+    setError(null);
+    try {
+      const result = await api.siteBuilder.featureBuilds();
+      setBuilds(result.items);
+    } catch (reason) {
+      setError(reason);
+    }
+  };
+
+  if (error) return <ErrorState error={error} title="Не удалось загрузить сборки фич" onRetry={() => void retryBuilds()} />;
   if (!page) return <div className="flex h-full min-h-0 flex-col items-center justify-center gap-3 p-6 text-center"><p className="text-sm text-muted-foreground">Эта страница уже удалена или недоступна.</p><Button type="button" variant="outline" onClick={onBack}><ArrowLeft />К маршрутам</Button></div>;
   return <div className="h-full min-h-0 overflow-y-auto bg-background px-4 py-4 sm:px-7 sm:py-6">
     <div className="mx-auto max-w-5xl space-y-5">
@@ -127,14 +137,14 @@ export default function PageEditorPage({ pageId, onBack }: { pageId: string; onB
           <div className="min-w-0"><p className="text-xs text-muted-foreground">Страницы и маршруты · ревизия {revision}</p><h1 className="truncate text-2xl font-semibold tracking-tight">{page.name}</h1><p className="mt-1 text-sm text-muted-foreground">Соберите страницу из фич и настройте аргументы их размещения.</p></div>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <span className={`flex items-center gap-1.5 text-xs ${dirty ? "text-amber-700 dark:text-amber-300" : "text-emerald-700 dark:text-emerald-300"}`}><span className={`size-1.5 rounded-full ${dirty ? "bg-amber-500" : "bg-emerald-500"}`} />{dirty ? "Есть изменения" : "Сохранено"}</span>
+          <span className={`flex items-center gap-1.5 text-xs ${dirty ? "text-warning" : "text-success"}`}><span className={`size-1.5 rounded-full ${dirty ? "bg-warning" : "bg-success"}`} />{dirty ? "Есть изменения" : "Сохранено"}</span>
           {conflict && <><span className="hidden items-center gap-1 text-xs text-destructive sm:flex"><AlertTriangle className="size-3.5" />Конфликт ревизий</span><Button type="button" size="sm" variant="outline" disabled={saving} onClick={() => void reload()}><RotateCcw />Обновить</Button></>}
           <Button type="button" size="sm" onClick={() => void save()} disabled={!dirty || saving}>{saving ? <Save /> : dirty ? <Save /> : <Check />}{saving ? "Сохраняем…" : dirty ? "Сохранить" : "Сохранено"}</Button>
           <Button type="button" size="sm" variant="outline" className="text-destructive" onClick={() => removePage(page.id)}><Trash2 />Удалить</Button>
         </div>
       </div>
 
-      <Card><CardHeader className="pb-3"><CardTitle className="text-base">Адреса страницы</CardTitle><CardDescription>Несколько маршрутов могут открывать одну и ту же страницу.</CardDescription></CardHeader><CardContent className="flex flex-wrap gap-2">{pageRoutes.length ? pageRoutes.map((route) => <code key={route.id} className="rounded-md border border-border bg-muted/40 px-2.5 py-1.5 text-sm">{route.path}</code>) : <p className="text-sm text-amber-700 dark:text-amber-300">У страницы пока нет маршрута. Вернитесь на канвас и создайте для неё корневой путь.</p>}</CardContent></Card>
+      <Card><CardHeader className="pb-3"><CardTitle className="text-base">Адреса страницы</CardTitle><CardDescription>Несколько маршрутов могут открывать одну и ту же страницу.</CardDescription></CardHeader><CardContent className="flex flex-wrap gap-2">{pageRoutes.length ? pageRoutes.map((route) => <code key={route.id} className="rounded-md border border-border bg-muted/40 px-2.5 py-1.5 text-sm">{route.path}</code>) : <p className="text-sm text-warning">У страницы пока нет маршрута. Вернитесь на канвас и создайте для неё корневой путь.</p>}</CardContent></Card>
 
       <Card><CardHeader><CardTitle className="text-base">Параметры страницы</CardTitle><CardDescription>Имя видно редакторам; тип используется при настройке коллекций и detail-фич.</CardDescription></CardHeader><CardContent className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_13rem]"><div className="space-y-1.5"><Label htmlFor="page-name">Название страницы</Label><Input id="page-name" value={page.name} onChange={(event) => changePage(page.id, { name: event.currentTarget.value })} /></div><label className="space-y-1.5 text-sm"><span className="text-muted-foreground">Тип страницы</span><select className="h-9 w-full rounded-md border border-input bg-background px-3" value={page.kind} onChange={(event) => changePage(page.id, { kind: event.currentTarget.value as SitePage["kind"] })}><option value="page">Обычная страница</option><option value="collection-list">Список коллекции</option><option value="detail">Карточка записи</option></select></label></CardContent></Card>
 

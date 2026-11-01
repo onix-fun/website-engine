@@ -95,8 +95,8 @@ function CreateTokenDialog({
         <DialogHeader>
           <DialogTitle>Новый токен доступа</DialogTitle>
           <DialogDescription>
-            Токен — это учётная запись принципала. Секрет показывается только один
-            раз сразу после создания.
+            Токен задаёт доступ и роль учётной записи. Секрет показывается только
+            один раз сразу после создания.
           </DialogDescription>
         </DialogHeader>
 
@@ -374,7 +374,7 @@ export default function TokensPage() {
           <p className="mt-1 text-sm text-muted-foreground">
             {principal?.role === "moderator"
               ? "Модератор видит и отзывает только выпущенные им токены."
-              : "Каждый токен — это принципал с ролью. Отзыв действует немедленно."}
+              : "Токен задаёт роль учётной записи. Отзыв сразу прекращает доступ."}
           </p>
         </div>
         <div className="flex gap-2">

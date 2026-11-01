@@ -18,6 +18,7 @@ import { ApiError } from "@/api";
 import { errorMessage } from "@/lib/errors";
 import { roleLabels } from "@/lib/format";
 import { useDocumentTitle } from "@/components/common/page";
+import { BrandSymbol } from "@/components/common/brand-symbol";
 import { ThemeToggle } from "@/components/common/theme-toggle";
 import { Button } from "@/components/ui/button";
 import { Input, Label } from "@/components/ui/input";
@@ -32,15 +33,8 @@ type LoginValues = z.infer<typeof loginSchema>;
 function BrandMark() {
   return (
     <div className="flex items-center gap-2.5">
-      <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-primary text-base font-bold text-primary-foreground">
-        W
-      </span>
-      <span className="leading-tight">
-        <span className="block text-sm font-semibold">Website Engine</span>
-        <span className="block text-2xs text-muted-foreground">
-          управление контентом
-        </span>
-      </span>
+      <BrandSymbol className="size-9 text-foreground" />
+      <span className="text-sm font-semibold leading-tight">Слой</span>
     </div>
   );
 }
@@ -84,7 +78,7 @@ export function LoginPage() {
       <div className="flex min-h-dvh flex-col bg-background">
         <div className="flex items-center justify-between px-4 py-4 sm:px-6">
           <BrandMark />
-          <ThemeToggle compact />
+          <ThemeToggle />
         </div>
         <div className="flex flex-1 items-center justify-center px-4 pb-16">
           <div className="w-full max-w-md rounded-lg border border-border bg-card p-6">
@@ -144,28 +138,13 @@ export function LoginPage() {
             Защищённый доступ
           </Badge>
           <h1 className="text-balance text-3xl font-semibold tracking-tight">
-            Операционная панель управления контентом
+            Панель управления сайтом
           </h1>
           <p className="mt-4 text-sm leading-7 text-muted-foreground">
-            Схемы, редактор контента, черновики, публикации, заявки и медиатека —
-            в одном рабочем пространстве с явным жизненным циклом данных.
+            Страницы, контент и публикации — в одном рабочем месте.
           </p>
-          <div className="mt-8 grid gap-4 border-t border-border pt-6 sm:grid-cols-3">
-            {[
-              ["Схемы", "Визуальный конструктор полей и связей"],
-              ["Контент", "Блоки, медиа, предпросмотр и история"],
-              ["Доступ", "Bearer-токены с ролевыми ограничениями"],
-            ].map(([title, text]) => (
-              <div key={title}>
-                <p className="text-xs font-semibold">{title}</p>
-                <p className="mt-1 text-xs leading-5 text-muted-foreground">{text}</p>
-              </div>
-            ))}
-          </div>
         </div>
-        <p className="text-2xs text-muted-foreground">
-          Website Engine · headless CMS
-        </p>
+        <p className="text-2xs text-muted-foreground">Слой</p>
       </section>
 
       <main className="flex flex-col">
@@ -173,7 +152,7 @@ export function LoginPage() {
           <div className="lg:hidden">
             <BrandMark />
           </div>
-          <ThemeToggle compact />
+          <ThemeToggle />
         </div>
         <div className="flex flex-1 items-center justify-center px-4 pb-16 sm:px-8">
           <div className="w-full max-w-sm">
@@ -182,7 +161,7 @@ export function LoginPage() {
                 <LockKeyhole className="h-5 w-5 text-muted-foreground" />
               </div>
               <h1 className="text-xl font-semibold tracking-tight">
-                Вход в панель управления
+                Войти в Слой
               </h1>
               <p className="mt-1.5 text-sm leading-6 text-muted-foreground">
                 Вставьте Bearer-токен, выданный администратором.
@@ -273,7 +252,7 @@ export function NoAccessScreen() {
     <div className="flex min-h-dvh flex-col bg-background">
       <div className="flex items-center justify-between px-4 py-4 sm:px-6">
         <BrandMark />
-        <ThemeToggle compact />
+        <ThemeToggle />
       </div>
       <div className="flex flex-1 items-center justify-center px-4 pb-16">
         <div className="w-full max-w-md rounded-lg border border-border bg-card p-6">

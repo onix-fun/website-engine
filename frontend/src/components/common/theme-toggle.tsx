@@ -1,58 +1,47 @@
 import { Monitor, Moon, Sun } from "lucide-react";
 import { useTheme, type ThemeMode } from "@/app/theme";
 import { Button } from "@/components/ui/button";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuLabel,
-  DropdownMenuRadioGroup,
-  DropdownMenuRadioItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { cn } from "@/lib/utils";
 
-const options: Array<{ value: ThemeMode; label: string; icon: typeof Sun }> = [
-  { value: "system", label: "Системная", icon: Monitor },
-  { value: "light", label: "Светлая", icon: Sun },
-  { value: "dark", label: "Тёмная", icon: Moon },
-];
+const modes: ThemeMode[] = ["system", "light", "dark"];
+const modeLabels: Record<ThemeMode, string> = {
+  system: "Системная",
+  light: "Светлая",
+  dark: "Тёмная",
+};
 
-export function ThemeToggle({ compact = false }: { compact?: boolean }) {
+export function ThemeToggle({
+  collapsed = false,
+  className,
+}: {
+  collapsed?: boolean;
+  className?: string;
+}) {
   const { mode, resolved, setMode } = useTheme();
-  const Icon = mode === "system" ? Monitor : resolved === "dark" ? Moon : Sun;
+  const Icon = mode === "system" ? Monitor : mode === "light" ? Sun : Moon;
+  const currentMode = mode === "system"
+    ? `Системная · сейчас ${resolved === "dark" ? "тёмная" : "светлая"}`
+    : modeLabels[mode];
+  const nextMode = modes[(modes.indexOf(mode) + 1) % modes.length];
+
   return (
-    <DropdownMenu>
-      <DropdownMenuTrigger asChild>
+    <Tooltip>
+      <TooltipTrigger asChild>
         <Button
+          type="button"
           variant="ghost"
-          size={compact ? "icon" : "sm"}
-          aria-label="Тема интерфейса"
-          className={compact ? undefined : "gap-2 px-2.5"}
+          size="icon"
+          aria-label={`Переключить тему. Сейчас: ${currentMode}`}
+          onClick={() => setMode(nextMode)}
+          className={cn("shrink-0 rounded-xl text-muted-foreground hover:text-foreground", className)}
         >
-          <Icon className="h-4 w-4" />
-          {!compact && (
-            <span className="text-xs text-muted-foreground">
-              {options.find((option) => option.value === mode)?.label}
-            </span>
-          )}
+          <Icon className="size-4" aria-hidden="true" />
         </Button>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" className="w-44">
-        <DropdownMenuLabel>Тема интерфейса</DropdownMenuLabel>
-        <DropdownMenuRadioGroup
-          value={mode}
-          onValueChange={(value) => setMode(value as ThemeMode)}
-        >
-          {options.map((option) => {
-            const OptionIcon = option.icon;
-            return (
-              <DropdownMenuRadioItem key={option.value} value={option.value}>
-                <OptionIcon className="mr-2 h-4 w-4" />
-                {option.label}
-              </DropdownMenuRadioItem>
-            );
-          })}
-        </DropdownMenuRadioGroup>
-      </DropdownMenuContent>
-    </DropdownMenu>
+      </TooltipTrigger>
+      <TooltipContent side={collapsed ? "right" : "top"}>
+        Тема: {currentMode}. Нажмите, чтобы переключить.
+      </TooltipContent>
+    </Tooltip>
   );
 }

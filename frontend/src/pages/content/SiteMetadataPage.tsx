@@ -3,13 +3,15 @@ import { Globe2, ImagePlus, RotateCcw, Save, Send } from "lucide-react";
 import { toast } from "sonner";
 import { api, isApiError } from "@/api";
 import { useAuth } from "@/app/auth";
+import { useConfirm } from "@/components/common/confirm";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { ErrorState, PageHeader } from "@/components/common/page";
+import { ErrorState, PageHeader, useDocumentTitle, useUnsavedChangesGuard } from "@/components/common/page";
 import { MediaPickerDialog } from "@/domains/media/MediaPickerDialog";
+import { SiteCorsSettings } from "@/pages/content/SiteCorsSettings";
 import type { SiteMetadata, SiteMetadataOverride, SiteMetadataState } from "@/types";
 
 const errorText = (error: unknown) => error instanceof Error ? error.message : "Неизвестная ошибка";
@@ -21,7 +23,9 @@ function MediaField({ label, value, onChange }: { label: string; value?: string;
 }
 
 export default function SiteMetadataPage() {
+  useDocumentTitle("Основные настройки сайта");
   const auth = useAuth();
+  const confirm = useConfirm();
   const canPromote = auth.principal?.role === "admin" || auth.principal?.role === "moderator";
   const [state, setState] = useState<SiteMetadataState | null>(null);
   const [saved, setSaved] = useState<SiteMetadata | null>(null);
@@ -45,6 +49,7 @@ export default function SiteMetadataPage() {
   useEffect(() => { void reload(); }, [reload]);
 
   const dirty = useMemo(() => Boolean(state && saved && JSON.stringify(state.draft) !== JSON.stringify(saved)), [state, saved]);
+  const guard = useUnsavedChangesGuard(dirty);
   const update = (next: SiteMetadata) => setState((current) => current ? { ...current, draft: next } : current);
   const updatePage = (pageId: string, key: keyof SiteMetadataOverride, value?: string) => {
     if (!state) return;
@@ -72,6 +77,19 @@ export default function SiteMetadataPage() {
     } finally { setSaving(false); }
   };
 
+  const reloadLatest = async () => {
+    if (dirty) {
+      const accepted = await confirm({
+        title: "Загрузить сохранённые настройки?",
+        description: "Несохранённые значения в этой форме будут заменены сохранённой версией.",
+        confirmLabel: "Загрузить",
+        destructive: true,
+      });
+      if (!accepted) return;
+    }
+    await reload();
+  };
+
   const publishDev = async () => {
     if (dirty) { toast.error("Сначала сохраните изменения."); return; }
     setPublishing(true);
@@ -80,6 +98,13 @@ export default function SiteMetadataPage() {
     finally { setPublishing(false); }
   };
   const promoteProd = async () => {
+    if (!state || dirty || state.devRevision === 0) return;
+    const accepted = await confirm({
+      title: "Продвинуть метаданные в production?",
+      description: <>Сохранённая версия dev r{state.devRevision} станет метаданными production и обновит публичные страницы.</>,
+      confirmLabel: "Продвинуть в production",
+    });
+    if (!accepted) return;
     setPublishing(true);
     try { const next = await api.siteBuilder.promoteMetadata(); setState(next); setSaved(next.draft); toast.success("Метаданные продвинуты в prod"); }
     catch (reason) { toast.error(errorText(reason)); }
@@ -87,14 +112,16 @@ export default function SiteMetadataPage() {
   };
 
   if (loading) return <div className="p-8 text-sm text-muted-foreground">Загружаем основные настройки…</div>;
-  if (error || !state) return <ErrorState error={error} title="Не удалось загрузить основные настройки сайта" />;
+  if (error || !state) return <><ErrorState error={error} title="Не удалось загрузить основные настройки сайта" onRetry={() => void reload()} />{guard.dialog}</>;
 
   const devTitle = state.dev.siteName || "Не опубликовано";
   const prodTitle = state.prod.siteName || "Не опубликовано";
-  return <div className="space-y-5">
-    <PageHeader title="Основные настройки сайта" description="Название, описание и изображения для поисковых систем и предпросмотра ссылок." actions={<><Button type="button" variant="outline" onClick={() => void reload()}><RotateCcw />Обновить</Button><Button type="button" onClick={() => void save()} loading={saving} disabled={!dirty}><Save />{dirty ? "Сохранить изменения" : "Сохранено"}</Button></>} />
-    <div className="flex flex-wrap items-center justify-between gap-3 border-y border-border py-2.5 text-sm"><span className="flex items-center gap-2"><span className={`size-2 rounded-full ${dirty ? "bg-amber-500" : "bg-emerald-500"}`} />{dirty ? "Есть несохранённые изменения" : `Черновик сохранён · ревизия ${state.revision}`}</span><div className="flex flex-wrap gap-3 text-xs text-muted-foreground"><span>dev r{state.devRevision}: {devTitle}</span><span>prod r{state.prodRevision}: {prodTitle}</span></div></div>
-    {conflict && <div role="alert" className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-amber-500/40 bg-amber-500/10 p-3 text-sm"><span>Настройки изменились в другой вкладке. Загрузите актуальную ревизию.</span><Button type="button" variant="outline" size="sm" onClick={() => void reload()}>Обновить</Button></div>}
+  return <>
+    {guard.dialog}
+    <div className="space-y-5">
+    <PageHeader title="Основные настройки сайта" description="Название, описание и изображения для поисковых систем и предпросмотра ссылок." actions={<><Button type="button" variant="outline" onClick={() => void reloadLatest()} disabled={loading || saving || publishing}><RotateCcw />Обновить</Button><Button type="button" onClick={() => void save()} loading={saving} disabled={!dirty || publishing}><Save />{dirty ? "Сохранить изменения" : "Сохранено"}</Button></>} />
+    <div className="flex flex-wrap items-center justify-between gap-3 border-y border-border py-2.5 text-sm"><span className={`flex items-center gap-2 ${dirty ? "text-warning" : "text-success"}`}><span className={`size-2 rounded-full ${dirty ? "bg-warning" : "bg-success"}`} />{dirty ? "Есть несохранённые изменения" : `Черновик сохранён · ревизия ${state.revision}`}</span><div className="flex flex-wrap gap-3 text-xs text-muted-foreground"><span>dev r{state.devRevision}: {devTitle}</span><span>prod r{state.prodRevision}: {prodTitle}</span></div></div>
+    {conflict && <div role="alert" className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-warning/40 bg-warning/10 p-3 text-sm text-warning"><span>Настройки изменились в другой вкладке. Загрузите актуальную ревизию.</span><Button type="button" variant="outline" size="sm" onClick={() => void reloadLatest()} disabled={loading || saving}>Обновить</Button></div>}
     <Card><CardHeader><CardTitle className="flex items-center gap-2 text-base"><Globe2 className="size-4" />Общие настройки</CardTitle><CardDescription>Используются для всех страниц, у которых нет переопределений.</CardDescription></CardHeader><CardContent className="grid gap-4 md:grid-cols-2">
       <div className="space-y-1.5"><Label htmlFor="site-name">Название сайта</Label><Input id="site-name" maxLength={200} value={state.draft.siteName} onChange={(event) => update({ ...state.draft, siteName: event.currentTarget.value })} /></div>
       <MediaField label="Favicon" value={state.draft.faviconMediaId} onChange={(faviconMediaId) => update({ ...state.draft, faviconMediaId })} />
@@ -105,9 +132,10 @@ export default function SiteMetadataPage() {
       <MediaField label="Изображение ссылки" value={state.draft.ogImageMediaId} onChange={(ogImageMediaId) => update({ ...state.draft, ogImageMediaId })} />
       <label className="space-y-1.5 md:col-span-2"><Label htmlFor="og-description">Описание</Label><Textarea id="og-description" value={state.draft.ogDescription ?? ""} onChange={(event) => update({ ...state.draft, ogDescription: event.currentTarget.value })} rows={3} maxLength={2048} /></label>
     </CardContent></Card>
-    {state.pages.length > 0 && <Card><CardHeader><CardTitle className="text-base">Переопределения страниц</CardTitle><CardDescription>Пустые поля наследуют общие настройки. Адресные параметры не меняют SEO этой страницы.</CardDescription></CardHeader><CardContent className="space-y-3">{state.pages.map((page) => {
+    {canPromote && <SiteCorsSettings />}
+    {state.pages.length > 0 && <Card><CardHeader><CardTitle className="text-base">Переопределения страниц</CardTitle><CardDescription>Пустые поля наследуют общие настройки. Адресные параметры не меняют SEO этой страницы.</CardDescription></CardHeader><CardContent className="divide-y divide-border">{state.pages.map((page) => {
       const override = state.draft.pages?.[page.id];
-      return <details key={page.id} className="group rounded-md border border-border"><summary className="cursor-pointer list-none px-4 py-3 text-sm font-medium">{page.name}<span className="ml-2 text-xs font-normal text-muted-foreground">{page.id}</span></summary><div className="grid gap-4 border-t border-border p-4 md:grid-cols-2">
+      return <details key={page.id} className="group"><summary className="cursor-pointer list-none py-3 text-sm font-medium">{page.name}<span className="ml-2 text-xs font-normal text-muted-foreground">{page.id}</span></summary><div className="grid gap-4 border-t border-border py-4 md:grid-cols-2">
         <div className="space-y-1.5"><Label>Название страницы</Label><Input value={inherited(override, "siteName", state.draft.siteName)} onChange={(event) => updatePage(page.id, "siteName", event.currentTarget.value || undefined)} /></div>
         <MediaField label="Favicon страницы" value={override?.faviconMediaId ?? state.draft.faviconMediaId} onChange={(faviconMediaId) => updatePage(page.id, "faviconMediaId", faviconMediaId)} />
         <div className="space-y-1.5 md:col-span-2"><Label>Описание страницы</Label><Textarea value={inherited(override, "description", state.draft.description)} onChange={(event) => updatePage(page.id, "description", event.currentTarget.value || undefined)} rows={2} /></div>
@@ -117,6 +145,7 @@ export default function SiteMetadataPage() {
         {override && <Button type="button" size="sm" variant="ghost" className="md:col-span-2 md:justify-self-start" onClick={() => { const pages = { ...(state.draft.pages ?? {}) }; delete pages[page.id]; update({ ...state.draft, pages }); }}>Сбросить переопределения страницы</Button>}
       </div></details>;
     })}</CardContent></Card>}
-    <div className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-border bg-muted/20 p-4"><div><p className="text-sm font-medium">Публикация метаданных</p><p className="mt-1 text-xs text-muted-foreground">Публикация обновит HTML shell маршрутов без создания нового снапшота.</p></div><div className="flex flex-wrap gap-2"><Button type="button" variant="outline" onClick={() => void publishDev()} loading={publishing} disabled={dirty}><Send />Опубликовать в dev</Button>{canPromote && <Button type="button" onClick={() => void promoteProd()} loading={publishing}><Send />Продвинуть в prod</Button>}</div></div>
-  </div>;
+    <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border bg-muted/20 p-4"><div><p className="text-sm font-medium">Публикация метаданных</p><p className="mt-1 text-xs text-muted-foreground">Обновит HTML публичных страниц без создания снапшота.</p>{canPromote && state.devRevision === 0 && <p className="mt-1 text-xs text-muted-foreground">Сначала опубликуйте метаданные в dev.</p>}</div><div className="flex flex-wrap gap-2"><Button type="button" variant="outline" onClick={() => void publishDev()} loading={publishing} disabled={dirty || publishing}><Send />Опубликовать в dev</Button>{canPromote && <Button type="button" onClick={() => void promoteProd()} loading={publishing} disabled={dirty || publishing || state.devRevision === 0}><Send />Продвинуть в prod</Button>}</div></div>
+    </div>
+  </>;
 }

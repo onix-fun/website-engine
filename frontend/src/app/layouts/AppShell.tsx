@@ -2,7 +2,6 @@ import {
   Suspense,
   useEffect,
   useState,
-  type ReactNode,
 } from "react";
 import {
   Link,
@@ -11,17 +10,14 @@ import {
   useLocation,
 } from "react-router-dom";
 import {
-  ChevronRight,
+  ChevronLeft,
   Home,
   Image,
   Inbox,
-  KeyRound,
   Layers,
   LayoutDashboard,
   LogOut,
   Menu,
-  PanelLeftClose,
-  PanelLeftOpen,
   Settings,
   Settings2,
   Blocks,
@@ -29,24 +25,16 @@ import {
   History,
   Palette,
   ShieldCheck,
-  UserRound,
 } from "lucide-react";
 import { useAuth } from "@/app/auth";
 import { ThemeToggle } from "@/components/common/theme-toggle";
-import { RoleBadge } from "@/components/common/status-badges";
+import { BrandSymbol } from "@/components/common/brand-symbol";
 import { LoadingPage } from "@/components/common/page";
 import { Button } from "@/components/ui/button";
 import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
-import {
   Sheet,
   SheetContent,
+  SheetDescription,
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet";
@@ -55,9 +43,7 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
-import { roleLabels } from "@/lib/format";
 
 const SIDEBAR_KEY = "we_admin_sidebar_collapsed";
 
@@ -80,14 +66,17 @@ const siteSettingsNav: NavItem[] = [
   { to: "/site/design-system", label: "Дизайн-система", icon: Palette, match: (p) => p === "/site/design-system" },
 ];
 
+const siteMetadataNav: NavItem[] = [
+  { to: "/site-metadata", label: "Настройки сайта", icon: Settings2, match: (p) => p.startsWith("/site-metadata") },
+];
+
 const administrationNav: NavItem[] = [
   { to: "/access/tokens", label: "Доступы", icon: ShieldCheck, match: (p) => p.startsWith("/access") },
   { to: "/settings", label: "Настройки", icon: Settings, match: (p) => p.startsWith("/settings") },
 ];
 
 const contentNav: NavItem[] = [
-  { to: "/content", label: "Контент", icon: Layers, match: (p) => p.startsWith("/content") || /^\/features\/[^/]+/.test(p) },
-  { to: "/site-metadata", label: "Основные настройки сайта", icon: Settings2, match: (p) => p.startsWith("/site-metadata") },
+  { to: "/content", label: "Контент", icon: Layers, match: (p) => p === "/content" },
   { to: "/media", label: "Файлы", icon: Image, match: (p) => p.startsWith("/media") },
   { to: "/submissions", label: "Заявки", icon: Inbox, match: (p) => p.startsWith("/submissions") },
 ];
@@ -96,71 +85,16 @@ function Brand({ compact = false }: { compact?: boolean }) {
   return (
     <Link
       to="/"
-      className="flex min-w-0 items-center gap-2.5 rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-      aria-label="Website Engine — на главную"
+      className="flex min-w-0 items-center gap-2 rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+      aria-label="Слой — на главную"
     >
-      <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-primary text-sm font-bold text-primary-foreground">
-        W
-      </span>
+      <BrandSymbol className="size-8 text-sidebar-foreground" />
       {!compact && (
         <span className="min-w-0 leading-tight">
-          <span className="block truncate text-sm font-semibold">Website Engine</span>
-          <span className="block truncate text-2xs text-muted-foreground">
-            Управление контентом
-          </span>
+          <span className="block truncate text-sm font-semibold">Слой</span>
         </span>
       )}
     </Link>
-  );
-}
-
-function UserMenu({
-  align = "end",
-  children,
-}: {
-  align?: "start" | "end";
-  children: ReactNode;
-}) {
-  const { principal, logout } = useAuth();
-  if (!principal) return null;
-  return (
-    <DropdownMenu>
-      <DropdownMenuTrigger asChild>{children}</DropdownMenuTrigger>
-      <DropdownMenuContent align={align} className="w-60">
-        <DropdownMenuLabel className="font-normal">
-          <p className="truncate text-sm font-medium text-foreground">{principal.name}</p>
-          <p className="mt-0.5 truncate text-xs text-muted-foreground">Текущий токен</p>
-        </DropdownMenuLabel>
-        <div className="px-2 pb-2">
-          <RoleBadge role={principal.role} />
-        </div>
-        <DropdownMenuSeparator />
-        {(principal.role === "admin" || principal.role === "moderator") && (
-          <DropdownMenuItem asChild>
-            <Link to="/access/tokens">
-              <KeyRound className="h-4 w-4" />
-              Токены доступа
-            </Link>
-          </DropdownMenuItem>
-        )}
-        {(principal.role === "admin" || principal.role === "moderator") && (
-          <DropdownMenuItem asChild>
-            <Link to="/settings">
-              <Settings className="h-4 w-4" />
-              Настройки
-            </Link>
-          </DropdownMenuItem>
-        )}
-        <DropdownMenuSeparator />
-        <DropdownMenuItem
-          className="text-destructive focus:text-destructive"
-          onSelect={() => logout()}
-        >
-          <LogOut className="h-4 w-4" />
-          Выйти
-        </DropdownMenuItem>
-      </DropdownMenuContent>
-    </DropdownMenu>
   );
 }
 
@@ -191,12 +125,19 @@ function NavList({
             data-active={active}
             className={cn(
               "sidebar-link",
-              collapsed && "justify-center px-0",
+              collapsed && "mx-auto h-9 w-9 justify-center gap-0 rounded-lg px-0",
             )}
             aria-current={active ? "page" : undefined}
           >
             <Icon className="h-4 w-4 shrink-0" aria-hidden="true" />
-            {!collapsed && <span className="truncate">{item.label}</span>}
+            <span
+              className={cn(
+                "min-w-0 overflow-hidden whitespace-nowrap transition-[max-width,opacity] duration-200 ease-in-out motion-reduce:transition-none",
+                collapsed ? "max-w-0 opacity-0" : "max-w-[12.5rem] opacity-100",
+              )}
+            >
+              {item.label}
+            </span>
           </NavLink>
         );
 
@@ -217,197 +158,111 @@ function NavList({
   );
 }
 
+function NavSectionLabel({
+  collapsed,
+  children,
+}: {
+  collapsed: boolean;
+  children: string;
+}) {
+  return (
+    <div className="relative flex h-4 items-center px-3">
+      <p
+        aria-hidden={collapsed}
+        className={cn(
+          "truncate text-xs font-semibold text-sidebar-muted transition-opacity duration-150 motion-reduce:transition-none",
+          collapsed ? "opacity-0" : "opacity-100",
+        )}
+      >
+        {children}
+      </p>
+      <span
+        aria-hidden="true"
+        className={cn(
+          "absolute left-2 right-2 top-1/2 border-t border-sidebar-border transition-opacity duration-150 motion-reduce:transition-none",
+          collapsed ? "opacity-100" : "opacity-0",
+        )}
+      />
+    </div>
+  );
+}
+
 function SidebarContent({
   collapsed,
-  showCollapse,
-  onToggleCollapse,
   onNavigate,
 }: {
   collapsed: boolean;
-  showCollapse: boolean;
-  onToggleCollapse?: () => void;
   onNavigate?: () => void;
 }) {
-  const { principal } = useAuth();
+  const { principal, logout } = useAuth();
   const siteManager = principal?.role === "admin" || principal?.role === "moderator";
+  const logoutButton = (
+    <Button
+      variant="ghost"
+      size={collapsed ? "icon" : "sm"}
+      onClick={() => logout()}
+      className={cn(
+        "rounded-xl text-sidebar-muted hover:text-sidebar-foreground",
+        collapsed ? "mx-auto size-10 px-0" : "min-w-0 flex-1 justify-start",
+      )}
+      aria-label="Выйти"
+    >
+      <LogOut className="size-4" />
+      {!collapsed && <span>Выйти</span>}
+    </Button>
+  );
   return (
     <div className="flex h-full min-h-0 flex-col">
       <div
-        className={cn(
-          "flex h-14 shrink-0 items-center border-b border-sidebar-border px-3",
-          collapsed ? "justify-center" : "justify-between",
-        )}
+        className="flex h-14 shrink-0 items-center justify-start border-b border-sidebar-border px-4"
       >
         <Brand compact={collapsed} />
-        {showCollapse && (
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                variant="ghost"
-                size="icon-sm"
-                onClick={onToggleCollapse}
-                className="text-muted-foreground"
-                aria-label={collapsed ? "Развернуть меню" : "Свернуть меню"}
-              >
-                {collapsed ? <PanelLeftOpen /> : <PanelLeftClose />}
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent side="right">
-              {collapsed ? "Развернуть меню" : "Свернуть меню"}
-            </TooltipContent>
-          </Tooltip>
-        )}
       </div>
 
       <nav
-        className={cn("flex-1 overflow-y-auto py-3 thin-scrollbar", collapsed ? "px-2" : "px-3")}
+        className="flex-1 overflow-y-auto px-3.5 pb-3 pt-4 thin-scrollbar"
         aria-label="Основная навигация"
       >
-        <NavList collapsed={collapsed} items={homeNav} onNavigate={onNavigate} />
+        <div>
+          <NavSectionLabel collapsed={collapsed}>Обзор</NavSectionLabel>
+          <NavList collapsed={collapsed} items={homeNav} onNavigate={onNavigate} />
+        </div>
+        <div className="mt-3">
+          <NavSectionLabel collapsed={collapsed}>Контент</NavSectionLabel>
+          <NavList collapsed={collapsed} items={contentNav} onNavigate={onNavigate} />
+        </div>
+        <div className="mt-3">
+          <NavSectionLabel collapsed={collapsed}>Сайт</NavSectionLabel>
+          <NavList collapsed={collapsed} items={siteMetadataNav} onNavigate={onNavigate} />
+          {siteManager && <NavList collapsed={collapsed} items={siteSettingsNav} onNavigate={onNavigate} />}
+        </div>
         {siteManager && (
-          <>
-            <div className="my-4 border-t border-sidebar-border" />
-            {!collapsed && <p className="mb-2 px-2 text-2xs font-medium uppercase tracking-wider text-sidebar-muted">Настройки сайта</p>}
-            <NavList collapsed={collapsed} items={siteSettingsNav} onNavigate={onNavigate} />
-            <div className="my-4 border-t border-sidebar-border" />
-            {!collapsed && <p className="mb-2 px-2 text-2xs font-medium uppercase tracking-wider text-sidebar-muted">Настройки и доступы</p>}
+          <div className="mt-3">
+            <NavSectionLabel collapsed={collapsed}>Администрирование</NavSectionLabel>
             <NavList collapsed={collapsed} items={administrationNav} onNavigate={onNavigate} />
-          </>
-        )}
-        <div className="my-4 border-t border-sidebar-border" />
-        {!collapsed && <p className="mb-2 px-2 text-2xs font-medium uppercase tracking-wider text-sidebar-muted">Контент</p>}
-        <NavList collapsed={collapsed} items={contentNav} onNavigate={onNavigate} />
-      </nav>
-
-      <div className={cn("shrink-0 border-t border-sidebar-border p-3", collapsed && "px-2")}>
-        {principal && (
-          <div
-            className={cn(
-              "flex items-center gap-2.5",
-              collapsed && "justify-center",
-            )}
-          >
-            <UserMenu>
-              <button
-                type="button"
-                className="flex min-w-0 flex-1 items-center gap-2.5 rounded-md p-1.5 text-left transition-colors hover:bg-sidebar-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                aria-label="Меню пользователя"
-              >
-                <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-sidebar-border bg-sidebar-accent text-xs font-semibold uppercase">
-                  {Array.from(principal.name)[0] ?? <UserRound />}
-                </span>
-                {!collapsed && (
-                  <span className="min-w-0 flex-1">
-                    <span className="block truncate text-xs font-medium text-sidebar-foreground">
-                      {principal.name}
-                    </span>
-                    <span className="block truncate text-2xs text-sidebar-muted">
-                      {roleLabels[principal.role]}
-                    </span>
-                  </span>
-                )}
-              </button>
-            </UserMenu>
           </div>
         )}
-        {!collapsed && (
-          <p className="mt-2 px-1.5 text-2xs text-sidebar-muted">
-            Веб-CMS · администрирование
-          </p>
+      </nav>
+
+      <div className="shrink-0 border-t border-sidebar-border p-3">
+        {principal && (
+          <div className={cn("flex gap-1", collapsed ? "flex-col items-center" : "items-center justify-between")}>
+            {collapsed && <ThemeToggle collapsed className="text-sidebar-muted hover:text-sidebar-foreground" />}
+            {collapsed ? (
+              <Tooltip>
+                <TooltipTrigger asChild>{logoutButton}</TooltipTrigger>
+                <TooltipContent side="right">Выйти</TooltipContent>
+              </Tooltip>
+            ) : logoutButton}
+            {!collapsed && <ThemeToggle className="text-sidebar-muted hover:text-sidebar-foreground" />}
+          </div>
         )}
       </div>
     </div>
   );
 }
 
-const segmentLabels: Record<string, string> = {
-  site: "Сайт",
-  router: "Страницы и маршруты",
-  pages: "Страницы и маршруты",
-  features: "Разделы",
-  new: "Создание",
-  schema: "Схема",
-  content: "Контент",
-  settings: "Настройки",
-  submissions: "Заявки",
-  media: "Медиа",
-  access: "Доступы",
-  tokens: "Токены",
-  users: "Пользователи",
-  roles: "Роли",
-};
-
-function Breadcrumbs() {
-  const location = useLocation();
-  const segments = location.pathname.split("/").filter(Boolean);
-  const crumbs: Array<{ label: string; to?: string }> = [
-    { label: "Главная", to: "/" },
-  ];
-  let accumulated = "";
-  segments.forEach((segment, index) => {
-    accumulated += `/${segment}`;
-    const isLast = index === segments.length - 1;
-    const parentSegment = segments[index - 1];
-    const label =
-      segmentLabels[segment] ??
-      (parentSegment === "features"
-        ? "Раздел"
-        : parentSegment === "submissions"
-          ? "Заявка"
-          : parentSegment === "content"
-            ? "Запись"
-            : segment.length > 18
-              ? "Объект"
-              : segment);
-    crumbs.push({ label, to: isLast ? undefined : accumulated });
-  });
-
-  return (
-    <nav aria-label="Хлебные крошки" className="min-w-0">
-      <ol className="flex min-w-0 items-center gap-1.5 text-xs">
-        {crumbs.map((crumb, index) => {
-          const last = index === crumbs.length - 1;
-          return (
-            <li key={`${crumb.label}-${index}`} className="flex min-w-0 items-center gap-1.5">
-              {index > 0 && (
-                <ChevronRight className="h-3 w-3 shrink-0 text-muted-foreground/60" aria-hidden="true" />
-              )}
-              {index === 0 ? (
-                <Link
-                  to={crumb.to ?? "/"}
-                  className="flex shrink-0 items-center text-muted-foreground transition-colors hover:text-foreground"
-                  aria-label="Главная"
-                >
-                  <Home className="h-3.5 w-3.5" />
-                </Link>
-              ) : crumb.to ? (
-                <Link
-                  to={crumb.to}
-                  className="truncate text-muted-foreground transition-colors hover:text-foreground"
-                >
-                  {crumb.label}
-                </Link>
-              ) : (
-                <span
-                  className={cn(
-                    "truncate",
-                    last ? "font-medium text-foreground" : "text-muted-foreground",
-                  )}
-                  aria-current={last ? "page" : undefined}
-                >
-                  {crumb.label}
-                </span>
-              )}
-            </li>
-          );
-        })}
-      </ol>
-    </nav>
-  );
-}
-
 export function AppShell() {
-  const { principal } = useAuth();
   const location = useLocation();
   const routeCanvas = location.pathname === "/site/pages" || location.pathname === "/site/router";
   const [collapsed, setCollapsed] = useState(() => {
@@ -446,15 +301,27 @@ export function AppShell() {
 
       <aside
         className={cn(
-          "sticky top-0 hidden h-dvh shrink-0 border-r border-sidebar-border bg-sidebar text-sidebar-foreground lg:flex lg:flex-col",
+          "relative sticky top-0 hidden h-dvh shrink-0 border-r border-sidebar-border bg-sidebar text-sidebar-foreground transition-[width] duration-200 ease-in-out motion-reduce:transition-none lg:flex lg:flex-col",
           collapsed ? "w-[var(--sidebar-collapsed)]" : "w-[var(--sidebar-width)]",
         )}
       >
-        <SidebarContent
-          collapsed={collapsed}
-          showCollapse
-          onToggleCollapse={() => setCollapsed((value) => !value)}
-        />
+        <SidebarContent collapsed={collapsed} />
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <button
+              type="button"
+              onClick={() => setCollapsed((value) => !value)}
+              aria-label={collapsed ? "Развернуть навигацию" : "Свернуть навигацию"}
+              aria-expanded={!collapsed}
+              className="absolute left-full top-1/2 z-50 inline-flex size-7 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full border border-sidebar-border bg-sidebar text-sidebar-muted shadow-sm transition-[background-color,color,box-shadow] hover:bg-sidebar-accent hover:text-sidebar-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            >
+              <ChevronLeft className={cn("size-3.5 transition-transform duration-200 ease-in-out motion-reduce:transition-none", collapsed && "rotate-180")} />
+            </button>
+          </TooltipTrigger>
+          <TooltipContent side="right">
+            {collapsed ? "Развернуть навигацию" : "Свернуть навигацию"}
+          </TooltipContent>
+        </Tooltip>
       </aside>
 
       <Sheet open={mobileOpen} onOpenChange={setMobileOpen}>
@@ -465,57 +332,37 @@ export function AppShell() {
         >
           <SheetHeader className="sr-only">
             <SheetTitle>Меню</SheetTitle>
+            <SheetDescription>Переход к разделам панели управления.</SheetDescription>
           </SheetHeader>
           <SidebarContent
             collapsed={false}
-            showCollapse={false}
             onNavigate={() => setMobileOpen(false)}
           />
         </SheetContent>
       </Sheet>
 
-      <div className="flex min-w-0 flex-1 flex-col">
-        <header className="sticky top-0 z-30 flex h-[var(--header-height)] shrink-0 items-center justify-between gap-3 border-b border-border bg-background px-3 sm:px-5">
-          <div className="flex min-w-0 items-center gap-2">
+      <div className="fixed left-3 top-3 z-40 lg:hidden">
+        <Tooltip>
+          <TooltipTrigger asChild>
             <Button
-              variant="ghost"
+              variant="outline"
               size="icon"
-              className="lg:hidden"
+              className="size-10 rounded-xl border-border/80 bg-background/90 shadow-sm backdrop-blur-sm"
               onClick={() => setMobileOpen(true)}
               aria-label="Открыть меню"
             >
               <Menu />
             </Button>
-            <Breadcrumbs />
-          </div>
-          <div className="flex shrink-0 items-center gap-1.5">
-            <ThemeToggle compact />
-            {principal && (
-              <div className="hidden items-center gap-1.5 sm:flex">
-                <Badge variant="muted" className="max-w-48 truncate">
-                  {principal.name}
-                </Badge>
-              </div>
-            )}
-            <UserMenu>
-              <Button
-                variant="ghost"
-                size="icon"
-                aria-label="Меню пользователя"
-                className="rounded-full"
-              >
-                <span className="flex h-7 w-7 items-center justify-center rounded-full border border-border bg-muted text-xs font-semibold uppercase">
-                  {principal ? Array.from(principal.name)[0] : <UserRound className="h-3.5 w-3.5" />}
-                </span>
-              </Button>
-            </UserMenu>
-          </div>
-        </header>
+          </TooltipTrigger>
+          <TooltipContent side="right">Открыть меню</TooltipContent>
+        </Tooltip>
+      </div>
 
+      <div className="flex min-w-0 flex-1 flex-col">
         <main
           id="main-content"
           tabIndex={-1}
-          className={`min-w-0 flex-1 focus-visible:outline-none ${routeCanvas ? "min-h-0 overflow-hidden" : ""}`}
+          className={`min-w-0 flex-1 pt-14 focus-visible:outline-none lg:pt-0 ${routeCanvas ? "min-h-0 overflow-hidden" : ""}`}
         >
           <Suspense fallback={<LoadingPage />}>
             <Outlet />

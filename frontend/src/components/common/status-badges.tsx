@@ -116,7 +116,7 @@ export function MediaStatusBadge({ status }: { status: MediaStatus }) {
     status === "ready"
       ? "success"
       : status === "processing"
-        ? "info"
+        ? "warning"
         : status === "failed"
           ? "destructive"
           : "muted";

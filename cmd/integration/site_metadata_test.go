@@ -45,8 +45,11 @@ func TestMetadataPublicationRendersShellAndPromotesWithSnapshot(t *testing.T) {
 	if _, err := env.snapshots.PublishMetadata(ctx, actor); err != nil {
 		t.Fatal(err)
 	}
-	snapshot, err := env.snapshots.Publish(ctx, actor, "SEO snapshot")
+	snapshot, err := env.snapshots.Create(ctx, actor, "SEO snapshot")
 	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := env.snapshots.Deploy(ctx, actor, snapshot.ID, environment.Dev); err != nil {
 		t.Fatal(err)
 	}
 
@@ -78,7 +81,7 @@ func TestMetadataPublicationRendersShellAndPromotesWithSnapshot(t *testing.T) {
 	if err != nil || !found || !strings.Contains(string(shell), `content="Новое описание без нового снапшота"`) {
 		t.Fatalf("metadata publication did not rebuild the active shell: found=%v err=%v html=%s", found, err, shell)
 	}
-	snapshots, err := env.snapshots.List(ctx, 20)
+	snapshots, err := env.snapshots.List(ctx, 20, nil)
 	if err != nil || len(snapshots) != 1 || snapshots[0].ID != snapshot.ID {
 		t.Fatalf("metadata publication unexpectedly changed snapshots: %#v err=%v", snapshots, err)
 	}

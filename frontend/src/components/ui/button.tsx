@@ -59,6 +59,8 @@ const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
     return (
       <Comp
         className={cn(buttonVariants({ variant, size, className }))}
+        data-ui-button=""
+        data-button-size={size ?? "default"}
         ref={ref}
         disabled={disabled || loading}
         aria-busy={loading || undefined}

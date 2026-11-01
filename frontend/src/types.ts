@@ -154,6 +154,9 @@ export interface DesignTokenDefinition {
   group: string;
   kind: "color" | "value";
   default: string;
+  min?: number;
+  max?: number;
+  unit?: string;
   scope?: "mobile";
 }
 
@@ -283,12 +286,6 @@ export interface MediaListParams {
 }
 
 export type MediaSort = "new" | "old" | "name" | "size_desc" | "size_asc";
-
-export interface CreateFeatureInput {
-  key: string;
-  name: string;
-  type: FeatureType;
-}
 
 export interface CreateTokenInput {
   name: string;
@@ -488,6 +485,8 @@ export interface SiteSnapshot {
 export interface SiteSnapshotList {
   items: SiteSnapshot[];
   active: Record<Environment, string>;
+  activeSnapshots?: Record<Environment, SiteSnapshot | null>;
+  nextCursor?: number;
 }
 
 export interface SiteMetadataOverride {

@@ -498,6 +498,10 @@ export default function FeatureContentPage() {
         </div>
       </div>
 
+      <div role="note" className="rounded-md border border-border bg-muted/30 px-4 py-3 text-sm leading-5 text-muted-foreground">
+        Сохранённые черновики записей и текстов попадут в следующий снапшот сайта. Создайте снапшот и разверните его в «Сайт → Снапшоты», чтобы обновить публичную версию.
+      </div>
+
       <div className="space-y-3">
         <div className="flex flex-col gap-2 sm:flex-row">
           <div className="relative flex-1">

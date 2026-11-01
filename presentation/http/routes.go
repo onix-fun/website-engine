@@ -132,7 +132,8 @@ func NewRouter(d Deps) http.Handler {
 		mux.Handle("PUT /api/v2/admin/site/design-system", jsonSiteManager(d.SiteSnapshots.SaveDesignSystem))
 		mux.Handle("POST /api/v2/admin/site/design-system/preview", jsonSiteManager(d.SiteSnapshots.PreviewDesignSystem))
 		mux.Handle("GET /api/v2/admin/site/snapshots", siteManager(d.SiteSnapshots.List))
-		mux.Handle("POST /api/v2/admin/site/snapshots", jsonSiteManager(d.SiteSnapshots.Publish))
+		mux.Handle("POST /api/v2/admin/site/snapshots", jsonSiteManager(d.SiteSnapshots.Create))
+		mux.Handle("POST /api/v2/admin/site/snapshots/{id}/deploy", jsonSiteManager(d.SiteSnapshots.Deploy))
 		mux.Handle("POST /api/v2/admin/site/snapshots/{id}/promote", jsonSiteManager(d.SiteSnapshots.Promote))
 		mux.Handle("POST /api/v2/admin/site/snapshots/{id}/rollback", jsonSiteManager(d.SiteSnapshots.Rollback))
 	}

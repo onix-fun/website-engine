@@ -49,7 +49,7 @@ createRoot(document.getElementById("root")!).render(
         <TooltipProvider delayDuration={250}>
           <AuthProvider>
             <ConfirmProvider>
-              <RouterProvider router={router} />
+              <RouterProvider router={router} future={{ v7_startTransition: true }} />
               <ThemedToaster />
             </ConfirmProvider>
           </AuthProvider>

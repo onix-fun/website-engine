@@ -10,6 +10,7 @@ import {
   ArrowLeft,
   Check,
   Copy,
+  Info,
   Inbox,
   Loader2,
   RefreshCw,
@@ -22,6 +23,7 @@ import { copyToClipboard } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/misc";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import {
   AlertDialog,
   AlertDialogCancel,
@@ -32,6 +34,71 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { buttonVariants } from "@/components/ui/button";
+
+type TooltipSide = "top" | "right" | "bottom" | "left";
+
+/** Keeps section help on one tooltip surface across pointer, keyboard, and touch. */
+export function ContextHelp({
+  children,
+  label = "Подсказка",
+  side = "top",
+  buttonClassName,
+}: {
+  children: ReactNode;
+  label?: string;
+  side?: TooltipSide;
+  buttonClassName?: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const [compactViewport, setCompactViewport] = useState(() =>
+    typeof window !== "undefined" && window.matchMedia("(max-width: 639px)").matches,
+  );
+  const [tooltipSide, setTooltipSide] = useState<TooltipSide>(() =>
+    typeof window !== "undefined" && side === "right" && window.matchMedia("(max-width: 639px)").matches
+      ? "top"
+      : side,
+  );
+  const accessibleDescription = typeof children === "string" ? children : undefined;
+
+  useEffect(() => {
+    const media = window.matchMedia("(max-width: 639px)");
+    const updateSide = () => {
+      setCompactViewport(media.matches);
+      setTooltipSide(media.matches && side === "right" ? "top" : side);
+    };
+    updateSide();
+    media.addEventListener("change", updateSide);
+    return () => media.removeEventListener("change", updateSide);
+  }, [side]);
+
+  return (
+    <Tooltip open={open} onOpenChange={setOpen}>
+      <TooltipTrigger asChild>
+        <button
+          type="button"
+          aria-label={label}
+          aria-description={accessibleDescription}
+          aria-expanded={open}
+          onClick={() => setOpen(true)}
+          className={cn(
+            "inline-flex size-6 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+            buttonClassName,
+          )}
+        >
+          <Info className="size-4" aria-hidden="true" />
+        </button>
+      </TooltipTrigger>
+      <TooltipContent
+        side={tooltipSide}
+        sideOffset={8}
+        style={compactViewport && side === "right" ? { maxWidth: "min(20rem, calc(100vw - 4rem))" } : undefined}
+        className="max-w-sm whitespace-normal text-left leading-5"
+      >
+        {children}
+      </TooltipContent>
+    </Tooltip>
+  );
+}
 
 export function PageHeader({
   title,
@@ -49,28 +116,37 @@ export function PageHeader({
   className?: string;
 }) {
   return (
-    <div className={cn("flex flex-col gap-4 pb-6 sm:flex-row sm:items-start sm:justify-between", className)}>
-      <div className="min-w-0">
-        {backTo && (
-          <Link
-            to={backTo}
-            className="mb-2 inline-flex items-center gap-1.5 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground"
-          >
-            <ArrowLeft className="h-3.5 w-3.5" />
-            {backLabel ?? "Назад"}
-          </Link>
-        )}
-        <h1 className="truncate text-xl font-semibold tracking-tight sm:text-2xl">
-          {title}
-        </h1>
+    <div
+      className={cn(
+        "flex flex-col gap-3 pb-6 xl:flex-row xl:items-start xl:justify-between",
+        className,
+      )}
+    >
+      <div className="flex min-w-0 items-start gap-2">
+        <div className="min-w-0">
+          {backTo && (
+            <Link
+              to={backTo}
+              className="mb-2 inline-flex items-center gap-1.5 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground"
+            >
+              <ArrowLeft className="h-3.5 w-3.5" />
+              {backLabel ?? "Назад"}
+            </Link>
+          )}
+          <h1 className="break-words text-balance text-[1.6rem] font-semibold leading-tight tracking-[-0.035em] sm:text-[1.8rem]">
+            {title}
+          </h1>
+        </div>
         {description && (
-          <p className="mt-1.5 max-w-3xl text-sm leading-6 text-muted-foreground">
+          <ContextHelp label="Подсказка по разделу" side="right" buttonClassName="mt-1.5 size-7">
             {description}
-          </p>
+          </ContextHelp>
         )}
       </div>
       {actions && (
-        <div className="flex shrink-0 flex-wrap items-center gap-2">{actions}</div>
+        <div className="flex min-w-0 flex-wrap items-center gap-2 xl:shrink-0 xl:justify-end">
+          {actions}
+        </div>
       )}
     </div>
   );
@@ -270,7 +346,7 @@ export function CopyButton({
 
 export function useDocumentTitle(title: string | undefined) {
   useEffect(() => {
-    document.title = title ? `${title} — Website Engine` : "Website Engine";
+    document.title = title ? `${title} — Слой` : "Слой";
   }, [title]);
 }
 
@@ -313,8 +389,7 @@ export function useUnsavedChangesGuard(
         <AlertDialogHeader>
           <AlertDialogTitle>Есть несохранённые изменения</AlertDialogTitle>
           <AlertDialogDescription>
-            Если уйти сейчас, несохранённые изменения в редакторе будут потеряны.
-            Останьтесь на странице и сохраните черновик или покиньте её.
+            Если уйти сейчас, несохранённые изменения будут потеряны. Останьтесь и сохраните их или покиньте страницу.
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>

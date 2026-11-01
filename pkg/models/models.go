@@ -238,7 +238,7 @@ type SiteSnapshot struct {
 	ID        UUID      `gorm:"column:id;primaryKey;not null"`
 	Sequence  int64     `gorm:"column:sequence;not null;uniqueIndex:uq_site_snapshots_sequence;autoIncrement"`
 	Name      string    `gorm:"column:name;not null"`
-	Digest    string    `gorm:"column:digest;not null;uniqueIndex:uq_site_snapshots_digest"`
+	Digest    string    `gorm:"column:digest;not null;index:idx_site_snapshots_digest"`
 	Payload   JSONB     `gorm:"column:payload;not null"`
 	CreatedBy *UUID     `gorm:"column:created_by"`
 	CreatedAt time.Time `gorm:"column:created_at;not null;default:now();index:idx_site_snapshots_created,priority:1,sort:desc"`
@@ -246,7 +246,7 @@ type SiteSnapshot struct {
 
 func (SiteSnapshot) TableName() string { return "site_snapshots" }
 
-// SiteSnapshotEvent records immutable snapshot creation, promotion and rollback.
+// SiteSnapshotEvent records snapshot deployments, promotion and rollback.
 type SiteSnapshotEvent struct {
 	ID           UUID      `gorm:"column:id;primaryKey;not null"`
 	SnapshotID   UUID      `gorm:"column:snapshot_id;not null;index:idx_site_snapshot_events_env,priority:2"`

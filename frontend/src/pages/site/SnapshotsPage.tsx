@@ -1,73 +1,226 @@
 import { useEffect, useState } from "react";
-import { History, Rocket, RotateCcw } from "lucide-react";
+import { History, Rocket, Save } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "@/api";
+import { useConfirm } from "@/components/common/confirm";
+import { EmptyState, ErrorState, PageHeader } from "@/components/common/page";
 import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/input";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { ErrorState } from "@/components/common/page";
-import type { SiteSnapshot, SiteSnapshotList } from "@/types";
+import type { Environment, SiteSnapshot, SiteSnapshotList } from "@/types";
 import { useSiteWorkspace } from "./SiteWorkspace";
 
-const emptyList: SiteSnapshotList = { items: [], active: { dev: "", prod: "" } };
-const message = (error: unknown) => error instanceof Error ? error.message : "Неизвестная ошибка";
+const emptyList: SiteSnapshotList = {
+  items: [],
+  active: { dev: "", prod: "" },
+  activeSnapshots: { dev: null, prod: null },
+};
+
+const errorMessage = (error: unknown) => error instanceof Error ? error.message : "Неизвестная ошибка";
+const environmentNames: Record<Environment, string> = { dev: "dev", prod: "production" };
+
+function SnapshotState({ snapshot, environment }: { snapshot: SiteSnapshot | null; environment: Environment }) {
+  return (
+    <Card>
+      <CardContent className="p-4">
+        <p className="text-xs text-muted-foreground">Активен в {environmentNames[environment]}</p>
+        {snapshot ? (
+          <div className="mt-1 min-w-0">
+            <p className="truncate text-sm font-medium">#{snapshot.sequence} · {snapshot.name}</p>
+            <p className="mt-1 text-xs text-muted-foreground">{new Date(snapshot.createdAt).toLocaleString("ru-RU")}</p>
+          </div>
+        ) : <p className="mt-1 text-sm text-muted-foreground">Нет активной версии</p>}
+      </CardContent>
+    </Card>
+  );
+}
 
 export default function SnapshotsPage() {
-  const { dirty } = useSiteWorkspace();
-  const [snapshots, setSnapshots] = useState(emptyList);
+  const { dirty, saving: draftSaving, conflict, save, reload } = useSiteWorkspace();
+  const confirm = useConfirm();
+  const [snapshots, setSnapshots] = useState<SiteSnapshotList>(emptyList);
   const [name, setName] = useState("");
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<unknown>(null);
-  const refresh = async () => setSnapshots(await api.siteBuilder.snapshots());
+
+  const refresh = async () => {
+    const result = await api.siteBuilder.snapshots();
+    setSnapshots(result);
+  };
+
+  const retry = async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      await refresh();
+    } catch (reason) {
+      setError(reason);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   useEffect(() => {
     let active = true;
-    api.siteBuilder.snapshots().then((result) => { if (active) setSnapshots(result); })
+    api.siteBuilder.snapshots()
+      .then((result) => { if (active) setSnapshots(result); })
       .catch((reason: unknown) => { if (active) setError(reason); })
       .finally(() => { if (active) setLoading(false); });
     return () => { active = false; };
   }, []);
 
-  const publish = async () => {
+  const create = async () => {
+    if (dirty) return;
     setBusy(true);
     try {
-      const result = await api.siteBuilder.publish(name.trim());
+      const snapshot = await api.siteBuilder.createSnapshot(name.trim());
       setName("");
       await refresh();
-      toast.success(`Снапшот #${result.sequence} опубликован в dev`);
-    } catch (reason) { toast.error(message(reason)); }
-    finally { setBusy(false); }
+      toast.success(`Снапшот #${snapshot.sequence} создан. Выберите среду для развёртывания.`);
+    } catch (reason) {
+      toast.error(errorMessage(reason));
+    } finally {
+      setBusy(false);
+    }
   };
-  const promote = async (snapshot: SiteSnapshot) => {
+
+  const deploy = async (snapshot: SiteSnapshot, environment: Environment) => {
+    const target = environment === "dev" ? "dev" : "production";
+    const accepted = await confirm({
+      title: `Развернуть снапшот в ${target}?`,
+      description: <>
+        Снапшот <strong>#{snapshot.sequence} · {snapshot.name}</strong> станет активной версией среды {target}.
+        Это можно сделать для любого снапшота; dev и production переключаются независимо.
+      </>,
+      confirmLabel: `Развернуть в ${target}`,
+    });
+    if (!accepted) return;
+
     setBusy(true);
-    try { await api.siteBuilder.promote(snapshot.id); await refresh(); toast.success(`Снапшот #${snapshot.sequence} продвинут в prod`); }
-    catch (reason) { toast.error(message(reason)); }
-    finally { setBusy(false); }
+    try {
+      await api.siteBuilder.deploySnapshot(snapshot.id, environment);
+      await refresh();
+      toast.success(`Снапшот #${snapshot.sequence} развёрнут в ${target}`);
+    } catch (reason) {
+      toast.error(errorMessage(reason));
+    } finally {
+      setBusy(false);
+    }
   };
-  const rollback = async (snapshot: SiteSnapshot, environment: "dev" | "prod") => {
-    if (!window.confirm(`Переключить ${environment} на снапшот #${snapshot.sequence}?`)) return;
-    setBusy(true);
-    try { await api.siteBuilder.rollback(snapshot.id, environment); await refresh(); toast.success(`${environment}: активирован снапшот #${snapshot.sequence}`); }
-    catch (reason) { toast.error(message(reason)); }
-    finally { setBusy(false); }
+
+  const loadMore = async () => {
+    if (snapshots.nextCursor === undefined || loadingMore) return;
+    setLoadingMore(true);
+    try {
+      const result = await api.siteBuilder.snapshots(snapshots.nextCursor);
+      setSnapshots((current) => {
+        const seen = new Set(current.items.map((item) => item.id));
+        return {
+          ...result,
+          items: [...current.items, ...result.items.filter((item) => !seen.has(item.id))],
+        };
+      });
+    } catch (reason) {
+      toast.error(errorMessage(reason));
+    } finally {
+      setLoadingMore(false);
+    }
   };
 
   if (loading) return <p className="p-6 text-sm text-muted-foreground">Загружаем снапшоты…</p>;
-  if (error) return <ErrorState error={error} title="Не удалось загрузить снапшоты" />;
-  const activeName = (id: string) => snapshots.items.find((item) => item.id === id)?.name ?? "Нет опубликованной версии";
+  if (error) return <ErrorState error={error} title="Не удалось загрузить снапшоты" onRetry={() => void retry()} />;
+
+  const activeRecord = (environment: Environment) => snapshots.activeSnapshots?.[environment]
+    ?? snapshots.items.find((item) => item.id === snapshots.active[environment])
+    ?? null;
 
   return (
-    <div className="space-y-4">
-      <div><h2 className="text-xl font-semibold tracking-tight">Снапшоты</h2><p className="mt-1 text-sm text-muted-foreground">Снапшот фиксирует сохранённый черновик, версии фичей и опубликованный контент.</p></div>
-      <div className="grid gap-3 sm:grid-cols-2"><Card><CardContent className="p-4"><p className="text-xs text-muted-foreground">Активен в dev</p><p className="mt-1 truncate text-sm font-medium">{activeName(snapshots.active.dev)}</p></CardContent></Card><Card><CardContent className="p-4"><p className="text-xs text-muted-foreground">Активен в prod</p><p className="mt-1 truncate text-sm font-medium">{activeName(snapshots.active.prod)}</p></CardContent></Card></div>
-      <Card><CardHeader><CardTitle className="text-base">Опубликовать в dev</CardTitle><CardDescription>Снапшот создаётся строго из последней сохранённой ревизии.</CardDescription></CardHeader><CardContent className="flex flex-wrap items-end gap-3"><div className="min-w-[16rem] flex-1 space-y-1.5"><Label htmlFor="snapshot-name">Название снапшота</Label><Input id="snapshot-name" value={name} onChange={(event) => setName(event.currentTarget.value)} placeholder="Например, каталог с новыми карточками" /></div><Button type="button" onClick={() => void publish()} loading={busy} disabled={dirty}><Rocket />Опубликовать в dev</Button>{dirty && <p className="basis-full text-xs text-amber-700 dark:text-amber-300">Сначала сохраните изменения в редакторе страниц или роутере.</p>}</CardContent></Card>
-      <Card><CardHeader><CardTitle className="text-base">История публикаций</CardTitle><CardDescription>Указатели dev и prod переключаются только после успешной проверки состава.</CardDescription></CardHeader><CardContent>
-        {snapshots.items.length === 0 ? <div className="rounded-md border border-dashed border-border px-4 py-10 text-center"><History className="mx-auto size-7 text-muted-foreground" /><p className="mt-3 text-sm font-medium">Снапшотов пока нет</p><p className="mt-1 text-sm text-muted-foreground">Сохраните страницы и опубликуйте первую версию в dev.</p></div> : <div className="divide-y divide-border">{snapshots.items.map((snapshot) => <div className="flex flex-wrap items-center justify-between gap-4 py-3 first:pt-0 last:pb-0" key={snapshot.id}>
-          <div className="min-w-0"><div className="flex flex-wrap items-center gap-2"><p className="text-sm font-medium">#{snapshot.sequence} · {snapshot.name}</p>{snapshot.id === snapshots.active.dev && <span className="rounded bg-blue-500/10 px-2 py-0.5 text-[11px] text-blue-700 dark:text-blue-300">dev</span>}{snapshot.id === snapshots.active.prod && <span className="rounded bg-emerald-500/10 px-2 py-0.5 text-[11px] text-emerald-700 dark:text-emerald-300">prod</span>}</div><p className="mt-1 truncate text-xs text-muted-foreground">{new Date(snapshot.createdAt).toLocaleString("ru-RU")} · sha256 {snapshot.digest}</p></div>
-          <div className="flex flex-wrap gap-2">{snapshot.id === snapshots.active.dev && snapshot.id !== snapshots.active.prod && <Button type="button" size="sm" onClick={() => void promote(snapshot)} disabled={busy}><Rocket />В prod</Button>}{snapshot.id !== snapshots.active.dev && <Button type="button" size="sm" variant="outline" onClick={() => void rollback(snapshot, "dev")} disabled={busy}><RotateCcw />Откатить dev</Button>}{snapshot.id !== snapshots.active.prod && <Button type="button" size="sm" variant="outline" onClick={() => void rollback(snapshot, "prod")} disabled={busy}><RotateCcw />Откатить prod</Button>}</div>
-        </div>)}</div>}
-      </CardContent></Card>
+    <div className="page-grid">
+      <PageHeader
+        title="Снапшоты"
+        description="Снапшот — неизменяемая копия текущего сохранённого черновика. Создайте сколько нужно версий и разверните любую сразу в dev или production."
+      />
+
+      <div className="space-y-4">
+        <section aria-label="Активные версии" className="grid gap-3 sm:grid-cols-2">
+          <SnapshotState snapshot={activeRecord("dev")} environment="dev" />
+          <SnapshotState snapshot={activeRecord("prod")} environment="prod" />
+        </section>
+
+        <Card>
+        <CardHeader>
+          <CardTitle className="text-base">Создать снапшот</CardTitle>
+          <CardDescription>Фиксируется только сохранённый черновик. Создание не меняет активные версии dev или production.</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
+            <div className="min-w-0 flex-1 space-y-1.5">
+              <Label htmlFor="snapshot-name">Название <span className="font-normal text-muted-foreground">(необязательно)</span></Label>
+              <Input id="snapshot-name" value={name} onChange={(event) => setName(event.currentTarget.value)} maxLength={160} placeholder="Например, каталог с новыми карточками" />
+            </div>
+            <Button type="button" onClick={() => void create()} loading={busy} disabled={dirty || draftSaving}>
+              <Save />Создать снапшот
+            </Button>
+          </div>
+          {dirty && (
+            <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-warning/40 bg-warning/10 p-3 text-sm">
+              <p className="text-warning">Есть несохранённые изменения страниц и маршрутов. Сохраните их, прежде чем создавать снапшот.</p>
+              <div className="flex gap-2">
+                {conflict && <Button type="button" size="sm" variant="outline" disabled={draftSaving} onClick={() => void reload()}>Загрузить актуальную версию</Button>}
+                <Button type="button" size="sm" disabled={draftSaving} onClick={() => void save()}>{draftSaving ? "Сохраняем…" : "Сохранить черновик"}</Button>
+              </div>
+            </div>
+          )}
+        </CardContent>
+        </Card>
+
+        <Card>
+        <CardHeader>
+          <CardTitle className="text-base">История снапшотов</CardTitle>
+          <CardDescription>Выберите версию и среду назначения. Развёртывание не требует предварительной отправки в dev.</CardDescription>
+        </CardHeader>
+        <CardContent>
+          {snapshots.items.length === 0 ? (
+            <EmptyState icon={History} title="Снапшотов пока нет" description="Сохраните черновик и создайте первую версию сайта." />
+          ) : (
+            <div className="divide-y divide-border">
+              {snapshots.items.map((snapshot) => {
+                const inDev = snapshot.id === snapshots.active.dev;
+                const inProd = snapshot.id === snapshots.active.prod;
+                return (
+                  <article className="flex flex-col gap-3 py-4 first:pt-0 last:pb-0 sm:flex-row sm:items-center sm:justify-between" key={snapshot.id}>
+                    <div className="min-w-0">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <h3 className="text-sm font-medium">#{snapshot.sequence} · {snapshot.name}</h3>
+                        {inDev && <span className="rounded-md bg-secondary px-2 py-0.5 text-[11px] text-secondary-foreground">Активен в dev</span>}
+                        {inProd && <span className="rounded-md bg-success/10 px-2 py-0.5 text-[11px] text-success">Активен в production</span>}
+                      </div>
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        {new Date(snapshot.createdAt).toLocaleString("ru-RU")} · <span className="break-all font-mono">SHA-256 {snapshot.digest}</span>
+                      </p>
+                    </div>
+                    <div className="flex shrink-0 flex-wrap gap-2">
+                      {!inDev && <Button type="button" size="sm" variant="outline" onClick={() => void deploy(snapshot, "dev")} disabled={busy}><Rocket />В dev</Button>}
+                      {!inProd && <Button type="button" size="sm" onClick={() => void deploy(snapshot, "prod")} disabled={busy}><Rocket />В production</Button>}
+                    </div>
+                  </article>
+                );
+              })}
+            </div>
+          )}
+          {snapshots.nextCursor !== undefined && (
+            <div className="mt-4 flex justify-center border-t border-border pt-4">
+              <Button type="button" variant="outline" onClick={() => void loadMore()} loading={loadingMore} disabled={busy}>
+                Показать более ранние снапшоты
+              </Button>
+            </div>
+          )}
+        </CardContent>
+        </Card>
+      </div>
     </div>
   );
 }

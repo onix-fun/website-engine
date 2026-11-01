@@ -9,7 +9,6 @@ import { formatDate, formatDateTime, roleLabels } from "@/lib/format";
 import {
   EmptyState,
   ErrorState,
-  InlineAlert,
   TableSkeleton,
 } from "@/components/common/page";
 import { RoleBadge, TokenStatusBadge } from "@/components/common/status-badges";
@@ -68,12 +67,8 @@ export default function UsersPage() {
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div>
           <h2 className="text-lg font-semibold tracking-tight">Пользователи</h2>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Принципалы доступа — это выпущенные токены. Имя «пользователя» совпадает
-            с названием токена.
-          </p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
           <Button
             variant="outline"
             onClick={() => void tokensQuery.refetch()}
@@ -90,12 +85,6 @@ export default function UsersPage() {
           </Button>
         </div>
       </div>
-
-      <InlineAlert tone="info" title="Как устроены пользователи">
-        Серверная часть не хранит отдельные учётные записи. Каждый активный токен — это
-        отдельный принципал с ролью, сроком действия и журналом последнего
-        использования. Чтобы добавить пользователя, выпустите новый токен.
-      </InlineAlert>
 
       <div className="grid grid-cols-3 gap-2">
         <div className="rounded-lg border border-border bg-card p-3">
@@ -161,7 +150,7 @@ export default function UsersPage() {
           description={
             search || role !== "all"
               ? "Измените запрос или фильтр роли."
-              : "Выпустите первый токен, чтобы создать принципала доступа."
+              : "Выпустите первый токен, чтобы добавить пользователя."
           }
           action={
             <Button asChild>

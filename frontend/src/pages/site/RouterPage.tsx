@@ -4,6 +4,7 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input, Label } from "@/components/ui/input";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { ContextHelp } from "@/components/common/page";
 import type { RouteTreeNode, SitePage } from "@/types";
 import { useSiteWorkspace } from "./SiteWorkspace";
 import PageEditorPage from "./PageEditorPage";
@@ -414,7 +415,7 @@ export default function RouterPage() {
         <div className="flex min-w-0 items-center gap-2 rounded-lg border border-border bg-card/95 px-3 py-2 shadow-sm backdrop-blur-sm">
           <GitBranch className="size-4 shrink-0 text-primary" />
           <div className="min-w-0"><h1 className="truncate text-sm font-semibold">Страницы и маршруты</h1><p className="hidden text-xs text-muted-foreground sm:block">{pathRootCount} корневых маршрута · {positions.length} узлов · ревизия {revision}</p></div>
-          <span className={`ml-1 flex shrink-0 items-center gap-1 rounded-full px-2 py-1 text-xs ${dirty ? "bg-amber-500/10 text-amber-700 dark:text-amber-300" : "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"}`}><span className={`size-1.5 rounded-full ${dirty ? "bg-amber-500" : "bg-emerald-500"}`} />{dirty ? "Изменено" : "Сохранено"}</span>
+          <span className={`ml-1 flex shrink-0 items-center gap-1 rounded-full px-2 py-1 text-xs ${dirty ? "bg-warning/10 text-warning" : "bg-success/10 text-success"}`}><span className={`size-1.5 rounded-full ${dirty ? "bg-warning" : "bg-success"}`} />{dirty ? "Изменено" : "Сохранено"}</span>
           {conflict && <span className="hidden items-center gap-1 text-xs text-destructive md:flex"><AlertTriangle className="size-3.5" />Черновик изменился</span>}
         </div>
         <div className="flex items-center gap-1 rounded-lg border border-border bg-card/95 p-1 shadow-sm backdrop-blur-sm">
@@ -429,8 +430,14 @@ export default function RouterPage() {
         </div>
       </div>
 
-      <div className="pointer-events-none absolute bottom-4 left-4 z-10 max-w-[calc(100vw-2rem)] rounded-md border border-border bg-card/90 px-3 py-2 text-xs text-muted-foreground shadow-sm backdrop-blur-sm sm:bottom-5 sm:left-5">
-        ПКМ — действия · перетащите кружок к узлу, чтобы вложить маршрут · отпустите в пустом месте, чтобы отделить
+      <div className="absolute bottom-4 left-4 z-10 sm:bottom-5 sm:left-5">
+        <ContextHelp
+          label="Подсказка по маршрутам"
+          side="top"
+          buttonClassName="size-10 rounded-xl border border-input bg-card/95 text-foreground shadow-sm backdrop-blur-sm hover:bg-accent"
+        >
+          ПКМ — действия маршрута. Перетащите кружок на узел, чтобы вложить маршрут, или в пустое место, чтобы отделить.
+        </ContextHelp>
       </div>
 
       <div className="absolute left-0 top-0 origin-top-left" style={{ transform: `translate(${pan.x}px, ${pan.y}px) scale(${scale})`, width: canvasWidth, height: canvasHeight }}>

@@ -57,9 +57,9 @@ function PathRow({
         <p className="text-sm">{label}</p>
         {hint && <p className="text-2xs text-muted-foreground">{hint}</p>}
       </div>
-      <div className="flex items-center gap-1.5">
-        <code className="truncate rounded bg-muted px-2 py-1 text-xs">{value}</code>
-        <CopyButton value={value} label="" className="h-7 px-2" />
+      <div className="flex min-w-0 items-center gap-1.5">
+        <code className="block min-w-0 flex-1 truncate rounded bg-muted px-2 py-1 text-xs">{value}</code>
+        <CopyButton value={value} label="" className="h-7 shrink-0 px-2" />
       </div>
     </div>
   );
@@ -116,13 +116,11 @@ export default function SettingsPage() {
         }
       />
 
-      <InlineAlert tone="info" title="Почему нельзя изменить здесь">
-        Настройки задаются переменными окружения и применяются при запуске сервера.
-        Секреты подключения (база данных, S3, bootstrap-токен) намеренно не
-        возвращаются API. Изменение ограничений — задача администратора сервера.
+      <InlineAlert tone="info" title="Настройки только для чтения">
+        Лимиты задаются в конфигурации сервера. Секреты подключения сюда не передаются.
       </InlineAlert>
 
-      <div className="grid gap-3 lg:grid-cols-2">
+      <div className="grid min-w-0 grid-cols-1 gap-3 lg:grid-cols-2">
         <Card>
           <CardHeader>
             <div className="flex items-center gap-2">
@@ -199,24 +197,12 @@ export default function SettingsPage() {
               <PathRow label="Админ-API" value={public_api.admin_path} />
               <PathRow label="Медиа" value={public_api.media_path} />
             </div>
-            <Separator className="my-3" />
-            <div className="flex flex-wrap items-center gap-2">
-              <span className="text-sm">CORS</span>
-              {public_api.cors_enabled ? (
-                <Badge variant="success">Включён</Badge>
-              ) : (
-                <Badge variant="muted">Источники не заданы</Badge>
-              )}
+            <div className="mt-3 flex flex-wrap items-center justify-between gap-2 border-t border-border pt-3">
+              <span className="text-xs text-muted-foreground">Источники CORS для dev и prod</span>
+              <Button variant="link" size="sm" asChild className="h-auto p-0">
+                <Link to="/site-metadata">Настроить в настройках сайта</Link>
+              </Button>
             </div>
-            {public_api.cors_origins.length > 0 && (
-              <div className="mt-2 flex flex-wrap gap-1">
-                {public_api.cors_origins.map((origin) => (
-                  <Badge key={origin} variant="outline">
-                    {origin}
-                  </Badge>
-                ))}
-              </div>
-            )}
           </CardContent>
         </Card>
 

@@ -1,65 +1,58 @@
 import { Link } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import { ArrowRight, Package } from "lucide-react";
+import { ArrowRight } from "lucide-react";
 import { api } from "@/api";
 import { Badge } from "@/components/ui/badge";
-import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/misc";
 import type { SiteSnapshot } from "@/types";
 
 const envLabels = { dev: "Разработка", prod: "Продакшен" } as const;
 
 /** Active immutable site snapshots for the dashboard. */
-export function SiteStatusCard() {
+export function SiteStatusSection() {
   const snapshots = useQuery({
     queryKey: ["site-snapshots"],
-    queryFn: ({ signal }) => api.siteBuilder.snapshots(signal),
+    queryFn: ({ signal }) => api.siteBuilder.snapshots(undefined, signal),
   });
 
   const findSnapshot = (id?: string): SiteSnapshot | undefined =>
     snapshots.data?.items.find((item) => item.id === id);
 
   return (
-    <Card>
-      <CardContent className="p-5">
-        <div className="flex items-center justify-between gap-3">
-          <div className="flex items-center gap-2">
-            <Package className="h-5 w-5 text-muted-foreground" aria-hidden="true" />
-            <div>
-              <h2 className="text-sm font-semibold">Сайт и снапшоты</h2>
-              <p className="mt-0.5 text-xs text-muted-foreground">
-                Активная версия в каждом окружении
-              </p>
-            </div>
-          </div>
+    <section aria-labelledby="site-status-title">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div>
+          <h2 id="site-status-title" className="text-sm font-semibold">Сайт и снапшоты</h2>
+          <p className="mt-0.5 text-xs text-muted-foreground">
+            Активная версия в каждом окружении
+          </p>
+        </div>
           <Link
             to="/site/snapshots"
-            className="flex items-center gap-1 text-xs text-muted-foreground transition-colors hover:text-foreground"
+            className="inline-flex min-h-11 items-center gap-1 rounded-sm text-xs text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           >
             Управление сайтом
             <ArrowRight className="h-3.5 w-3.5" />
           </Link>
-        </div>
+      </div>
 
-        <div className="mt-4 grid gap-3 sm:grid-cols-2">
+      <ul className="mt-3 divide-y divide-border sm:grid sm:grid-cols-2 sm:divide-x sm:divide-y-0" aria-label="Окружения">
           {snapshots.isLoading ? (
             <>
-              <Skeleton className="h-20 w-full" />
-              <Skeleton className="h-20 w-full" />
+              <li className="py-3 sm:pr-4"><Skeleton className="h-12 w-full" /></li>
+              <li className="py-3 sm:pl-4"><Skeleton className="h-12 w-full" /></li>
             </>
           ) : snapshots.error ? (
-            <p className="text-sm text-destructive sm:col-span-2">
+            <li className="py-3 text-sm text-destructive sm:col-span-2">
               Не удалось загрузить статус сред. Попробуйте открыть раздел «Сайт».
-            </p>
+            </li>
           ) : (
             (["dev", "prod"] as const).map((environment) => {
               const activeId = snapshots.data?.active[environment];
-              const snapshot = activeId ? findSnapshot(activeId) : undefined;
+              const snapshot = snapshots.data?.activeSnapshots?.[environment]
+                ?? (activeId ? findSnapshot(activeId) : undefined);
               return (
-                <div
-                  key={environment}
-                  className="rounded-md border border-border px-3 py-2.5"
-                >
+                <li key={environment} className="py-3 first:pt-3 sm:px-4 sm:first:pl-0 sm:last:pr-0">
                   <div className="flex items-center justify-between gap-2">
                     <span className="text-sm font-medium">
                       {envLabels[environment]}
@@ -77,12 +70,11 @@ export function SiteStatusCard() {
                       Снапшот не опубликован
                     </p>
                   )}
-                </div>
+                </li>
               );
             })
           )}
-        </div>
-      </CardContent>
-    </Card>
+      </ul>
+    </section>
   );
 }

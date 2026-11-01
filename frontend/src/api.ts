@@ -1,7 +1,6 @@
 import type {
   ApiErrorDetail,
   ApiErrorPayload,
-  CreateFeatureInput,
   CreateTokenInput,
   CreatedToken,
   ContentFeature,
@@ -428,12 +427,6 @@ export const api = {
         },
       });
     },
-    create(input: CreateFeatureInput): Promise<FeatureDetail> {
-      return request<FeatureDetail>(`${ADMIN_ROOT}/features`, {
-        method: "POST",
-        body: input,
-      });
-    },
     get(id: string, signal?: AbortSignal): Promise<FeatureDetail> {
       return request<FeatureDetail>(`${ADMIN_ROOT}/features/${encoded(id)}`, {
         signal,
@@ -825,18 +818,28 @@ export const api = {
     previewDesignSystem(designSystem: DesignSystem): Promise<{ token: string }> {
       return request(`${ADMIN_V2_ROOT}/site/design-system/preview`, { method: "POST", body: { designSystem } });
     },
-    async snapshots(signal?: AbortSignal): Promise<SiteSnapshotList> {
-      const snapshots = await request<SiteSnapshotList>(`${ADMIN_V2_ROOT}/site/snapshots`, { signal });
+    async snapshots(beforeSequence?: number, signal?: AbortSignal): Promise<SiteSnapshotList> {
+      const snapshots = await request<SiteSnapshotList>(`${ADMIN_V2_ROOT}/site/snapshots`, {
+        signal,
+        query: { beforeSequence },
+      });
       return {
         ...snapshots,
         items: arrayOrEmpty(snapshots?.items),
         active: snapshots?.active ?? { dev: "", prod: "" },
+        activeSnapshots: snapshots?.activeSnapshots ?? { dev: null, prod: null },
       };
     },
-    publish(name: string): Promise<SiteSnapshot> {
+    createSnapshot(name: string): Promise<SiteSnapshot> {
       return request<SiteSnapshot>(`${ADMIN_V2_ROOT}/site/snapshots`, {
         method: "POST",
         body: { name },
+      });
+    },
+    deploySnapshot(id: string, environment: Environment): Promise<SiteSnapshot> {
+      return request<SiteSnapshot>(`${ADMIN_V2_ROOT}/site/snapshots/${encoded(id)}/deploy`, {
+        method: "POST",
+        body: { environment },
       });
     },
     promote(id: string): Promise<SiteSnapshot> {

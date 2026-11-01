@@ -106,7 +106,13 @@ export const router = createBrowserRouter(
             { index: true, element: <DashboardPage /> },
             { path: "content", element: <ContentHomePage /> },
             { path: "site-metadata", element: <SiteMetadataPage /> },
-            { path: "features/new", element: <NotFoundPage /> },
+            { path: "features", element: <Navigate to="/content" replace /> },
+            {
+              element: <RequireSiteManager />,
+              children: [
+                { path: "features/new", element: <Navigate to="/site/features" replace /> },
+              ],
+            },
             {
               path: "features/:featureId",
               element: <FeatureLayout />,
@@ -165,5 +171,14 @@ export const router = createBrowserRouter(
       ],
     },
   ],
-  { basename: "/admin" },
+  {
+    basename: "/admin",
+    future: {
+      v7_fetcherPersist: true,
+      v7_normalizeFormMethod: true,
+      v7_partialHydration: true,
+      v7_relativeSplatPath: true,
+      v7_skipActionErrorRevalidation: true,
+    },
+  },
 );

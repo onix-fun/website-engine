@@ -33,9 +33,9 @@ const stateConfig: Record<
   { label: string; variant: "default" | "secondary" | "outline" | "muted" | "destructive" | "success" | "warning" | "info" }
 > = {
   draft: { label: "Только черновик", variant: "warning" },
-  published_dev: { label: "Публикация в dev", variant: "info" },
+  published_dev: { label: "Публикация в dev", variant: "success" },
   published: { label: "Опубликовано", variant: "success" },
-  published_with_draft: { label: "Есть новый черновик", variant: "info" },
+  published_with_draft: { label: "Есть новый черновик", variant: "warning" },
   unpublished: { label: "Снято с публикации", variant: "muted" },
   archived: { label: "В архиве", variant: "destructive" },
 };

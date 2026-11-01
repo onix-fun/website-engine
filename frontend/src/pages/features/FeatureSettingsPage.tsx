@@ -156,9 +156,9 @@ export default function FeatureSettingsPage() {
         <div className="mt-3 flex flex-wrap items-start justify-between gap-4">
           <div>
             <h1 className="text-lg font-semibold">Тексты страницы «{feature.name}»</h1>
-            <p className="mt-1 text-sm text-muted-foreground">Общие тексты и настройки коллекции. Они публикуются независимо от снапшота сайта.</p>
+            <p className="mt-1 text-sm text-muted-foreground">Общие тексты и настройки коллекции. Сохранённый черновик попадёт в следующий снапшот сайта.</p>
             <div className="mt-3 flex flex-wrap items-center gap-2">
-              {autosave.status === "saving" ? <Badge variant="info"><Loader2 className="h-3 w-3 animate-spin" />Сохранение</Badge> : dirty ? <Badge variant="warning"><CloudUpload className="h-3 w-3" />Есть изменения</Badge> : hasDraft ? <Badge variant="success"><Check className="h-3 w-3" />Сохранено</Badge> : entry?.dev ? <Badge variant="success"><Check className="h-3 w-3" />Опубликовано</Badge> : <Badge variant="muted">Черновик отсутствует</Badge>}
+              {autosave.status === "saving" ? <Badge variant="warning"><Loader2 className="h-3 w-3 animate-spin" />Сохранение</Badge> : dirty ? <Badge variant="warning"><CloudUpload className="h-3 w-3" />Есть изменения</Badge> : hasDraft ? <Badge variant="success"><Check className="h-3 w-3" />Сохранено</Badge> : entry?.dev ? <Badge variant="success"><Check className="h-3 w-3" />Опубликовано</Badge> : <Badge variant="muted">Черновик отсутствует</Badge>}
               {entry?.dev && <Badge variant="secondary">dev v{entry.dev.version}</Badge>}
               {entry?.prod && <Badge variant="success">prod v{entry.prod.version}</Badge>}
             </div>
@@ -174,6 +174,9 @@ export default function FeatureSettingsPage() {
 
       {autosave.status === "error" && Boolean(autosave.error) && <InlineAlert tone="danger" title="Не удалось сохранить настройки">{errorMessage(autosave.error)}</InlineAlert>}
       {autosave.conflict && <InlineAlert tone="danger" title="Конфликт версий">{autosave.conflict} Обновите страницу и повторите изменения.</InlineAlert>}
+      <div role="note" className="rounded-md border border-border bg-muted/30 px-4 py-3 text-sm leading-5 text-muted-foreground">
+        Чтобы обновить публичную страницу, сохраните черновик, затем создайте и разверните снапшот в разделе «Сайт → Снапшоты».
+      </div>
       {issues.length > 0 && <InlineAlert tone="warning" title="Заполните обязательные поля перед публикацией">{issues.slice(0, 5).map((issue) => issue.message).join(". ")}</InlineAlert>}
       {promotionError && (
         <InlineAlert tone="danger" title="Настройки не подходят для активной prod-схемы">

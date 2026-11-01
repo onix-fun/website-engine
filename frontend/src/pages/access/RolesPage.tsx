@@ -87,9 +87,8 @@ export default function RolesPage() {
       </div>
 
       <InlineAlert tone="info" title="Как выдаются права">
-        Права определяются ролью токена, а не отдельными флагами пользователя.
-        Чтобы изменить набор прав принципала, отзовите его токен и выпустите
-        новый с нужной ролью. <Link to="/access/tokens" className="underline">Перейти к токенам</Link>.
+        Права задаются ролью токена. Чтобы изменить их, отзовите токен и
+        выпустите новый с нужной ролью. <Link to="/access/tokens" className="underline">Перейти к токенам</Link>.
       </InlineAlert>
 
       <div className="grid gap-3 lg:grid-cols-3">

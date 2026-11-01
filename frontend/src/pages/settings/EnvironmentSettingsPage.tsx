@@ -4,7 +4,8 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { ArrowLeft, Save } from "lucide-react";
 import { api, isApiError } from "@/api";
-import { useDocumentTitle } from "@/components/common/page";
+import { ErrorState, useDocumentTitle, useUnsavedChangesGuard } from "@/components/common/page";
+import { InlineAlert } from "@/components/common/page";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -45,9 +46,11 @@ export default function EnvironmentSettingsPage() {
   }
   if (environments.error) {
     return (
-      <div className="text-sm text-destructive">
-        Не удалось загрузить среды. Попробуйте обновить страницу.
-      </div>
+      <ErrorState
+        error={environments.error}
+        title="Не удалось загрузить настройки среды"
+        onRetry={() => void environments.refetch()}
+      />
     );
   }
   if (!env) {
@@ -70,12 +73,17 @@ export default function EnvironmentSettingsPage() {
           <Badge variant={envKey === "prod" ? "success" : "secondary"}>{envKey}</Badge>
         </h1>
         <p className="mt-1 text-sm text-muted-foreground">
-          CORS-origins определяют, с каких адресов публичный API этой среды принимает запросы из браузера.
+          Имя и базовый адрес этой среды. Списки CORS для обеих сред собраны в{" "}
+          <Link to="/site-metadata" className="text-foreground underline underline-offset-4">
+            Настройках сайта
+          </Link>.
         </p>
       </div>
       <EnvironmentForm
-        key={env.updated_at}
+        key={env.revision}
         env={env}
+        reloading={environments.isFetching}
+        onReload={() => environments.refetch()}
         onSaved={() => {
           void queryClient.invalidateQueries({ queryKey: ["site-environments"] });
           toast.success("Настройки среды сохранены");
@@ -85,16 +93,12 @@ export default function EnvironmentSettingsPage() {
   );
 }
 
-function EnvironmentForm({ env, onSaved }: { env: SiteEnvironment; onSaved: () => void }) {
+function EnvironmentForm({ env, reloading, onReload, onSaved }: { env: SiteEnvironment; reloading: boolean; onReload: () => Promise<unknown>; onSaved: () => void }) {
   const [name, setName] = useState(env.name);
   const [baseUrl, setBaseUrl] = useState(env.public_base_url);
-  const [origins, setOrigins] = useState(env.cors_origins.join("\n"));
-
-  const splitLines = (raw: string) =>
-    raw
-      .split(/[\n,]+/)
-      .map((line) => line.trim())
-      .filter(Boolean);
+  const [conflict, setConflict] = useState(false);
+  const dirty = name !== env.name || baseUrl !== env.public_base_url;
+  const guard = useUnsavedChangesGuard(dirty);
 
   const save = useMutation({
     mutationFn: () =>
@@ -102,16 +106,13 @@ function EnvironmentForm({ env, onSaved }: { env: SiteEnvironment; onSaved: () =
         revision: env.revision,
         name: name.trim() || undefined,
         public_base_url: baseUrl.trim(),
-        cors_origins: splitLines(origins),
       }),
     onSuccess: () => {
       onSaved();
     },
     onError: (error) => {
       if (isApiError(error) && error.status === 409) {
-        toast.error(
-          "Настройки среды изменены другим пользователем. Перечитайте форму и повторите.",
-        );
+        setConflict(true);
         return;
       }
       toast.error(isApiError(error) ? error.message : "Не удалось сохранить настройки");
@@ -119,15 +120,26 @@ function EnvironmentForm({ env, onSaved }: { env: SiteEnvironment; onSaved: () =
   });
 
   return (
-    <Card>
+    <>
+      {guard.dialog}
+      <Card>
       <CardHeader>
         <CardTitle>Параметры среды</CardTitle>
         <CardDescription>
-          Ревизия формы: {env.revision}. Изменённая другими пользователем среда потребует перечитать
-          значения.
+          Ревизия {env.revision}
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
+        {conflict && (
+          <InlineAlert tone="warning" title="Настройки изменились">
+            Ваши поля останутся здесь. Загрузите актуальную ревизию, чтобы заменить их последними сохранёнными значениями.
+            <div className="mt-3">
+              <Button type="button" variant="outline" size="sm" onClick={() => void onReload()} disabled={reloading || save.isPending}>
+                {reloading ? "Загружаем…" : "Загрузить актуальную ревизию"}
+              </Button>
+            </div>
+          </InlineAlert>
+        )}
         <label className="block max-w-md text-sm">
           <span className="mb-1 block text-xs text-muted-foreground">Название</span>
           <Input value={name} onChange={(event) => setName(event.target.value)} maxLength={200} />
@@ -144,39 +156,25 @@ function EnvironmentForm({ env, onSaved }: { env: SiteEnvironment; onSaved: () =
             ссылок.
           </span>
         </label>
-        <label className="block max-w-lg text-sm">
-          <span className="mb-1 block text-xs text-muted-foreground">
-            CORS-origins публичного API (по одному в строке)
-          </span>
-          <textarea
-            className="min-h-20 w-full rounded-md border border-border bg-transparent px-3 py-2 text-sm"
-            value={origins}
-            onChange={(event) => setOrigins(event.target.value)}
-            placeholder={"https://app.example\nhttps://editor.example"}
-          />
-          <span className="mt-1 block text-xs text-muted-foreground">
-            Применяется без перезапуска. Пока список пуст, используются bootstrap-origins из
-            конфигурации.
-          </span>
-        </label>
         <div className="flex items-center gap-2">
-          <Button onClick={() => save.mutate()} loading={save.isPending}>
+          <Button onClick={() => save.mutate()} loading={save.isPending} disabled={!dirty || reloading || conflict}>
             <Save />
             Сохранить
           </Button>
           <Button
             variant="outline"
             type="button"
+            disabled={!dirty || conflict}
             onClick={() => {
               setName(env.name);
               setBaseUrl(env.public_base_url);
-              setOrigins(env.cors_origins.join("\n"));
             }}
           >
             Сбросить
           </Button>
         </div>
       </CardContent>
-    </Card>
+      </Card>
+    </>
   );
 }

@@ -90,7 +90,7 @@ func singlePageConfig(key, version string) map[string]any {
 	}
 }
 
-func saveAndPublishSnapshot(t *testing.T, env *testEnv, config map[string]any, name string) map[string]any {
+func saveAndDeploySnapshot(t *testing.T, env *testEnv, config map[string]any, name string) map[string]any {
 	t.Helper()
 	status, draft, _ := env.request(http.MethodGet, "/api/v2/admin/site/draft", env.adminToken, nil)
 	if status != http.StatusOK {
@@ -104,7 +104,11 @@ func saveAndPublishSnapshot(t *testing.T, env *testEnv, config map[string]any, n
 	}
 	status, snapshot, _ := env.request(http.MethodPost, "/api/v2/admin/site/snapshots", env.adminToken, map[string]any{"name": name})
 	if status != http.StatusCreated {
-		t.Fatalf("publish site snapshot: status=%d body=%v", status, snapshot)
+		t.Fatalf("create site snapshot: status=%d body=%v", status, snapshot)
+	}
+	status, deployed, _ := env.request(http.MethodPost, "/api/v2/admin/site/snapshots/"+snapshot["id"].(string)+"/deploy", env.adminToken, map[string]any{"environment": "dev"})
+	if status != http.StatusOK || deployed["id"] != snapshot["id"] {
+		t.Fatalf("deploy site snapshot to dev: status=%d body=%v", status, deployed)
 	}
 	return snapshot
 }
@@ -176,59 +180,69 @@ func TestFeatureBuildListReturnsEmptyArray(t *testing.T) {
 	}
 }
 
-func TestFeatureBuildSnapshotKeepsEditorialContentIndependent(t *testing.T) {
+func TestSnapshotPinsDraftEditorialContentAndDeploysIndependently(t *testing.T) {
 	env := newTestEnv(t)
 	env.content.SetSchemaProvider(env.snapshots)
 	key := "snapshot-single"
 	manifest := manifestFor(key, "1.0.0", "single", objectSchema(map[string]any{"title": map[string]any{"type": "string", "minLength": 1}}, "title"))
 	build := uploadFeatureBuild(t, env, manifest, "export default function Feature() { return 'v1'; }")
 	featureID := build["featureId"].(string)
-	first := saveAndPublishSnapshot(t, env, singlePageConfig(key, "1.0.0"), "first")
+	first := saveAndDeploySnapshot(t, env, singlePageConfig(key, "1.0.0"), "first")
 	firstID := first["id"].(string)
-	duplicateSnapshot := saveAndPublishSnapshot(t, env, singlePageConfig(key, "1.0.0"), "same content")
-	if duplicateSnapshot["id"] != firstID {
-		t.Fatalf("publishing identical content should reuse its immutable snapshot: %v", duplicateSnapshot)
-	}
-
-	status, promoted, _ := env.request(http.MethodPost, "/api/v2/admin/site/snapshots/"+firstID+"/promote", env.adminToken, map[string]any{})
-	if status != http.StatusOK || promoted["id"] != firstID {
-		t.Fatalf("promote active dev snapshot: status=%d body=%v", status, promoted)
-	}
 	entryID, revision := createAndPublishEntry(t, env, featureID, map[string]any{"title": "Pinned title"})
-	status, promotedContent, _ := env.request(http.MethodPost, "/api/v1/admin/entries/"+entryID+"/promote", env.adminToken, map[string]any{"revision": revision})
-	if status != http.StatusOK {
-		t.Fatalf("promote content independently: status=%d body=%v", status, promotedContent)
-	}
-	revision = promotedContent["revision"].(float64)
 
-	updateAndPublishEntry(t, env, entryID, revision, map[string]any{"title": "New dev title"})
-	second := saveAndPublishSnapshot(t, env, singlePageConfig(key, "1.0.0"), "second")
-	if second["id"] != firstID {
-		t.Fatalf("content-only changes must reuse the same immutable site snapshot, got %v", second)
+	second := saveAndDeploySnapshot(t, env, singlePageConfig(key, "1.0.0"), "pinned content")
+	secondID := second["id"].(string)
+	status, duplicateSnapshot, _ := env.request(http.MethodPost, "/api/v2/admin/site/snapshots", env.adminToken, map[string]any{"name": "same content"})
+	if status != http.StatusCreated || duplicateSnapshot["id"] == secondID || duplicateSnapshot["digest"] != second["digest"] || firstID == secondID {
+		t.Fatalf("identical content should still create a new snapshot with a matching digest: status=%d body=%v", status, duplicateSnapshot)
+	}
+	status, listed, _ := env.request(http.MethodGet, "/api/v2/admin/site/snapshots", env.adminToken, nil)
+	if status != http.StatusOK || listed["active"].(map[string]any)["dev"] != secondID {
+		t.Fatalf("creating a snapshot must not change the active dev version: status=%d body=%v", status, listed)
+	}
+	duplicateID := duplicateSnapshot["id"].(string)
+	status, deployed, _ := env.request(http.MethodPost, "/api/v2/admin/site/snapshots/"+duplicateID+"/deploy", env.adminToken, map[string]any{"environment": "prod"})
+	if status != http.StatusOK || deployed["id"] != duplicateID {
+		t.Fatalf("directly deploy a snapshot to prod: status=%d body=%v", status, deployed)
+	}
+
+	status, currentEntry, _ := env.request(http.MethodGet, "/api/v1/admin/entries/"+entryID, env.adminToken, nil)
+	if status != http.StatusOK {
+		t.Fatalf("get entry revision after snapshot deploy: status=%d body=%v", status, currentEntry)
+	}
+	revision = currentEntry["revision"].(float64)
+	status, entryDraft, _ := env.request(http.MethodPatch, "/api/v1/admin/entries/"+entryID+"/draft", env.adminToken, map[string]any{"revision": revision, "data": map[string]any{"title": "New draft title"}})
+	if status != http.StatusOK {
+		t.Fatalf("save content draft: status=%d body=%v", status, entryDraft)
+	}
+	third := saveAndDeploySnapshot(t, env, singlePageConfig(key, "1.0.0"), "new draft content")
+	if third["id"] == secondID || third["digest"] == second["digest"] {
+		t.Fatalf("content drafts must be part of a new immutable snapshot: %v", third)
 	}
 	devPlacement := runtimePlacement(t, env, env.devServer.URL, "/")
-	if got := devPlacement["content"].(map[string]any)["title"]; got != "New dev title" {
-		t.Fatalf("dev runtime should read the latest dev content independently of its snapshot, got %v", got)
+	if got := devPlacement["content"].(map[string]any)["title"]; got != "New draft title" {
+		t.Fatalf("dev runtime should use the draft content pinned by its active snapshot, got %v", got)
 	}
 	prodPlacement := runtimePlacement(t, env, env.prodServer.URL, "/")
 	if got := prodPlacement["content"].(map[string]any)["title"]; got != "Pinned title" {
-		t.Fatalf("prod content should remain unchanged until separately promoted, got %v", got)
+		t.Fatalf("prod should retain the content from its independently deployed snapshot, got %v", got)
 	}
 
-	status, rollback, _ := env.request(http.MethodPost, "/api/v2/admin/site/snapshots/"+firstID+"/rollback", env.adminToken, map[string]any{"environment": "dev"})
-	if status != http.StatusOK || rollback["id"] != firstID {
-		t.Fatalf("rollback dev snapshot: status=%d body=%v", status, rollback)
+	status, deployed, _ = env.request(http.MethodPost, "/api/v2/admin/site/snapshots/"+secondID+"/deploy", env.adminToken, map[string]any{"environment": "dev"})
+	if status != http.StatusOK || deployed["id"] != secondID {
+		t.Fatalf("deploy an older snapshot back to dev: status=%d body=%v", status, deployed)
 	}
 	devPlacement = runtimePlacement(t, env, env.devServer.URL, "/")
-	if got := devPlacement["content"].(map[string]any)["title"]; got != "New dev title" {
-		t.Fatalf("snapshot rollback must not roll back independently published content, got %v", got)
+	if got := devPlacement["content"].(map[string]any)["title"]; got != "Pinned title" {
+		t.Fatalf("deploying an older snapshot should restore its pinned content, got %v", got)
 	}
 	var snapshotContentCount int
-	if err := env.pool.QueryRow(context.Background(), `SELECT count(*) FROM site_snapshot_content WHERE snapshot_id=$1`, uuid.MustParse(firstID)).Scan(&snapshotContentCount); err != nil {
+	if err := env.pool.QueryRow(context.Background(), `SELECT count(*) FROM site_snapshot_content WHERE snapshot_id=$1`, uuid.MustParse(secondID)).Scan(&snapshotContentCount); err != nil {
 		t.Fatal(err)
 	}
-	if snapshotContentCount != 0 {
-		t.Fatalf("new snapshots must not capture editorial records, found %d", snapshotContentCount)
+	if snapshotContentCount != 1 {
+		t.Fatalf("snapshot must pin its single editorial record, found %d", snapshotContentCount)
 	}
 
 	_, err := env.pool.Exec(context.Background(), `UPDATE site_snapshots SET name='tampered' WHERE id=$1`, uuid.MustParse(firstID))
@@ -266,7 +280,7 @@ func TestSnapshotPinnedFormSchemaAndPersistentSubmissions(t *testing.T) {
 	}
 	manifestV1 := manifestFor(key, "1.0.0", "form", objectSchema(map[string]any{"name": map[string]any{"type": "string", "minLength": 1}}, "name"))
 	buildV1 := uploadFeatureBuild(t, env, manifestV1, "export default function Feature() {}")
-	first := saveAndPublishSnapshot(t, env, formConfig("1.0.0"), "form v1")
+	first := saveAndDeploySnapshot(t, env, formConfig("1.0.0"), "form v1")
 	env.forms.SetSnapshotSchemaProvider(env.snapshots)
 
 	status, response, _ := env.public(environment.Dev, http.MethodPost, "/api/v2/forms/"+key+"/submissions", map[string]any{"data": map[string]any{"name": "Ada"}})
@@ -311,7 +325,7 @@ func TestSnapshotPinnedFormSchemaAndPersistentSubmissions(t *testing.T) {
 	if buildV1["schemaVersionId"] == buildV2["schemaVersionId"] {
 		t.Fatal("each feature build must pin its own content schema version")
 	}
-	second := saveAndPublishSnapshot(t, env, formConfig("1.1.0"), "form v2")
+	second := saveAndDeploySnapshot(t, env, formConfig("1.1.0"), "form v2")
 	status, invalid, _ := env.public(environment.Dev, http.MethodPost, "/api/v2/forms/"+key+"/submissions", map[string]any{"data": map[string]any{"name": "Grace"}})
 	if status != http.StatusBadRequest {
 		t.Fatalf("dev v2 should validate with its snapshot schema: status=%d body=%v", status, invalid)
@@ -443,12 +457,12 @@ func TestCollectionRuntimeFiltersAndResolvesDetailRoutes(t *testing.T) {
 			}},
 		}},
 	}
-	snapshot := saveAndPublishSnapshot(t, env, config, "products")
+	snapshot := saveAndDeploySnapshot(t, env, config, "products")
 	if _, ok := snapshot["id"].(string); !ok {
 		t.Fatalf("snapshot missing id: %v", snapshot)
 	}
 
-	status, page, _ := env.public(environment.Dev, http.MethodGet, "/api/v2/content/"+collectionKey+"/records?field=category&value=feed&offset=0&limit=1", nil)
+	status, page, _ := env.public(environment.Dev, http.MethodGet, "/api/v2/content/"+collectionKey+"/records?snapshot="+snapshot["id"].(string)+"&field=category&value=feed&offset=0&limit=1", nil)
 	if status != http.StatusOK {
 		t.Fatalf("filtered collection query: status=%d body=%v", status, page)
 	}

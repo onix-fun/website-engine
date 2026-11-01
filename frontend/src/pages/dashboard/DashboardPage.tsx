@@ -28,8 +28,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/misc";
-import { cn } from "@/lib/utils";
-import { SiteStatusCard } from "@/pages/dashboard/SiteStatusCard";
+import { SiteStatusSection } from "@/pages/dashboard/SiteStatusCard";
 
 const statDefinitions: Array<{
   key: keyof OverviewCounts;
@@ -75,7 +74,7 @@ const activityMeta: Record<
   feature: { icon: Layers, label: "Раздел", to: "/content" },
   entry: { icon: FileText, label: "Запись", to: "/content" },
   submission: { icon: Inbox, label: "Заявка", to: "/submissions" },
-  media: { icon: Image, label: "Медиа", to: "/media" },
+  media: { icon: Image, label: "Файлы", to: "/media" },
 };
 
 function activityTitle(item: OverviewActivity): string {
@@ -240,14 +239,17 @@ export default function DashboardPage() {
         </>
       ) : overview.data ? (
         <div className="space-y-6">
-          <section aria-label="Операционные показатели" className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+          <section
+            aria-label="Операционные показатели"
+            className="grid gap-x-5 gap-y-4 border-y border-border py-4 sm:grid-cols-2 xl:grid-cols-4"
+          >
             {statDefinitions.map((stat) => {
               const Icon = stat.icon;
               return (
                 <Link
                   key={stat.key}
                   to={stat.to}
-                  className="group rounded-lg border border-border bg-card p-4 transition-colors hover:border-primary/40 hover:bg-accent/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  className="group rounded-sm transition-colors hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                 >
                   <div className="flex items-start justify-between gap-3">
                     <div className="flex items-center gap-2 text-xs font-medium text-muted-foreground">
@@ -256,7 +258,7 @@ export default function DashboardPage() {
                     </div>
                     <ArrowRight className="h-4 w-4 text-muted-foreground/50 transition-transform group-hover:translate-x-0.5" />
                   </div>
-                  <p className="mt-3 text-2xl font-semibold tabular-nums">
+                  <p className="mt-2 text-2xl font-semibold tabular-nums">
                     {overview.data.counts[stat.key]}
                   </p>
                   <p className="mt-1 text-xs text-muted-foreground">{stat.description}</p>
@@ -265,7 +267,7 @@ export default function DashboardPage() {
             })}
           </section>
 
-          {canManageSite && <SiteStatusCard />}
+          {canManageSite && <SiteStatusSection />}
 
           <div className="grid gap-4 xl:grid-cols-[1.25fr_1fr]">
             <section className="rounded-lg border border-border bg-card" aria-labelledby="attention-title">
@@ -407,9 +409,9 @@ export default function DashboardPage() {
           </div>
 
           {!hasAnyFeature && canManageSite && (
-            <section className="rounded-lg border border-border bg-card p-5">
-              <h2 className="text-sm font-semibold">Быстрый старт</h2>
-              <ol className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            <section className="border-t border-border pt-4" aria-labelledby="quick-start-title">
+              <h2 id="quick-start-title" className="text-sm font-semibold">Быстрый старт</h2>
+              <ol className="mt-3 grid gap-x-5 gap-y-4 sm:grid-cols-2 lg:grid-cols-4">
                 {[
                   ["1", "Загрузить фичи", "Импортировать ZIP-сборки с манифестами", "/site/features"],
                   ["2", "Собрать страницы", "Настроить маршруты и размещения", "/site/pages"],
@@ -419,14 +421,12 @@ export default function DashboardPage() {
                   <li key={step}>
                     <Link
                       to={to}
-                      className={cn(
-                        "block h-full rounded-md border border-border p-3 transition-colors hover:bg-muted/40",
-                      )}
+                      className="group block h-full rounded-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                     >
-                      <span className="flex h-6 w-6 items-center justify-center rounded-full bg-primary/10 text-xs font-semibold text-primary">
+                      <span className="font-mono text-xs text-muted-foreground group-hover:text-primary">
                         {step}
                       </span>
-                      <span className="mt-2 block text-sm font-medium">{title}</span>
+                      <span className="mt-1 block text-sm font-medium group-hover:text-primary">{title}</span>
                       <span className="mt-0.5 block text-xs text-muted-foreground">{text}</span>
                     </Link>
                   </li>
